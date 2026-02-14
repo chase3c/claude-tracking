@@ -726,7 +726,14 @@ async function doSend() {
   container.appendChild(msgEl);
   container.scrollTop = container.scrollHeight;
 
-  await sendMessage(state.modalSessionId, msg);
+  const result = await sendMessage(state.modalSessionId, msg);
+  if (result && !result.ok) {
+    msgEl.style.borderLeft = '3px solid #e74c3c';
+    const errEl = document.createElement('div');
+    errEl.style.cssText = 'color:#e74c3c;font-size:0.85em;margin-top:4px;';
+    errEl.textContent = `Failed to send: ${result.error || 'Unknown error'}`;
+    msgEl.querySelector('.chat-msg-body').appendChild(errEl);
+  }
   chatSend.disabled = false;
   chatInput.focus();
 

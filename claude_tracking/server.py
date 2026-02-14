@@ -194,15 +194,33 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             pane = row["tmux_pane"]
+
+            # Verify the pane still exists before sending
+            check = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane, "#D"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if check.returncode != 0:
+                self.send_json({"ok": False, "error": f"Pane {pane} no longer exists"}, 400)
+                return
+
             # Send literal text first, then Enter as a separate key
-            subprocess.run(
+            result = subprocess.run(
                 ["tmux", "send-keys", "-t", pane, "-l", message],
-                timeout=5,
+                capture_output=True, text=True, timeout=5,
             )
-            subprocess.run(
+            if result.returncode != 0:
+                self.send_json({"ok": False, "error": f"tmux send-keys failed: {result.stderr.strip()}"}, 500)
+                return
+
+            result = subprocess.run(
                 ["tmux", "send-keys", "-t", pane, "Enter"],
-                timeout=5,
+                capture_output=True, text=True, timeout=5,
             )
+            if result.returncode != 0:
+                self.send_json({"ok": False, "error": f"tmux send-keys failed: {result.stderr.strip()}"}, 500)
+                return
+
             self.send_json({"ok": True})
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 500)
