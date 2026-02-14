@@ -33,7 +33,8 @@ def init_db(db):
             prompt_count INTEGER DEFAULT 0,
             tool_count INTEGER DEFAULT 0,
             model TEXT,
-            transcript_path TEXT
+            transcript_path TEXT,
+            source TEXT DEFAULT 'host'
         )
     """)
     db.execute("""
@@ -49,6 +50,12 @@ def init_db(db):
     # Migrate: add transcript_path if missing
     try:
         db.execute("ALTER TABLE sessions ADD COLUMN transcript_path TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migrate: add source if missing
+    try:
+        db.execute("ALTER TABLE sessions ADD COLUMN source TEXT DEFAULT 'host'")
         db.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
@@ -106,7 +113,7 @@ def derive_status(event_name):
     return "active"
 
 
-def track(data):
+def track(data, source=None, tmux_pane_override=None):
     now = datetime.now().isoformat()
     session_id = data.get("session_id", "unknown")
     event_name = data.get("hook_event_name", "unknown")
@@ -115,8 +122,28 @@ def track(data):
     tool_input = data.get("tool_input", {})
     model = data.get("model", "")
     transcript_path = data.get("transcript_path", "")
+    source = source or "host"
 
-    pane, window, tmux_session = get_tmux_info()
+    if tmux_pane_override:
+        pane = tmux_pane_override
+        # Look up window/session for the overridden pane
+        window = ""
+        tmux_session = ""
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane, "#W"],
+                capture_output=True, text=True, timeout=2,
+            )
+            window = result.stdout.strip()
+            result = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane, "#S"],
+                capture_output=True, text=True, timeout=2,
+            )
+            tmux_session = result.stdout.strip()
+        except Exception:
+            pass
+    else:
+        pane, window, tmux_session = get_tmux_info()
     detail = extract_detail(event_name, tool_name, tool_input)
     status = derive_status(event_name)
 
@@ -181,15 +208,15 @@ def track(data):
                (session_id, project_dir, tmux_pane, tmux_window, tmux_session,
                 status, started_at, last_activity, last_event, last_tool,
                 last_detail, last_prompt, prompt_count, tool_count, model,
-                transcript_path)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                transcript_path, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, cwd, pane, window, tmux_session,
                 status, now, now, event_name, tool_name,
                 detail, prompt_text,
                 1 if event_name == "UserPromptSubmit" else 0,
                 1 if tool_name else 0,
-                model, transcript_path,
+                model, transcript_path, source,
             ),
         )
 

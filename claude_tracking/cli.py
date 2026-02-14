@@ -1,5 +1,6 @@
 """CLI entry point for claude-track."""
 import argparse
+import os
 import sys
 
 
@@ -20,6 +21,16 @@ def main():
     )
 
     sub.add_parser("hook", help="Process a hook event from stdin (internal)")
+
+    bridge_parser = sub.add_parser(
+        "bridge-dirs", help="Manage directories scanned for container bridge events"
+    )
+    bridge_sub = bridge_parser.add_subparsers(dest="bridge_action")
+    bridge_sub.add_parser("list", help="List configured bridge directories")
+    bridge_add = bridge_sub.add_parser("add", help="Add a directory")
+    bridge_add.add_argument("path", help="Directory path to add")
+    bridge_rm = bridge_sub.add_parser("remove", help="Remove a directory")
+    bridge_rm.add_argument("path", help="Directory path to remove")
 
     args = parser.parse_args()
 
@@ -47,6 +58,35 @@ def main():
     elif args.command == "hook":
         from .track import handle_hook
         handle_hook()
+
+    elif args.command == "bridge-dirs":
+        from .server import load_bridge_dirs, save_bridge_dirs
+        dirs = load_bridge_dirs()
+        if args.bridge_action == "list":
+            if dirs:
+                for d in dirs:
+                    print(d)
+            else:
+                print("No bridge directories configured.")
+                print("Add one with: claude-track bridge-dirs add /path/to/workspace")
+        elif args.bridge_action == "add":
+            path = os.path.abspath(args.path)
+            if path not in dirs:
+                dirs.append(path)
+                save_bridge_dirs(dirs)
+                print(f"Added: {path}")
+            else:
+                print(f"Already configured: {path}")
+        elif args.bridge_action == "remove":
+            path = os.path.abspath(args.path)
+            if path in dirs:
+                dirs.remove(path)
+                save_bridge_dirs(dirs)
+                print(f"Removed: {path}")
+            else:
+                print(f"Not found: {path}")
+        else:
+            bridge_parser.print_help()
 
     else:
         parser.print_help()

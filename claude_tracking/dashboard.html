@@ -136,6 +136,19 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+  .badge-container {
+    display: inline-block;
+    background: rgba(188,140,255,0.15);
+    color: var(--purple);
+    border: 1px solid rgba(188,140,255,0.25);
+    border-radius: 4px;
+    padding: 0.1rem 0.45rem;
+    font-size: 0.7rem;
+    font-weight: 500;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
   .card-meta {
     display: flex;
     justify-content: space-between;
@@ -510,6 +523,15 @@ function projectName(path) {
   return path.split('/').filter(Boolean).pop() || path;
 }
 
+function isContainer(session) {
+  return session.source && session.source.startsWith('container:');
+}
+
+function containerName(session) {
+  if (!isContainer(session)) return '';
+  return session.source.slice('container:'.length);
+}
+
 function formatActivity(s) {
   const ev = s.last_event;
   const tool = s.last_tool;
@@ -609,11 +631,13 @@ function renderSessions(sessions) {
 
   container.innerHTML = filtered.map(s => {
     const activity = formatActivity(s);
+    const isCtr = isContainer(s);
     const hasPane = !!s.tmux_pane;
+    const badge = isCtr ? `<span class="badge-container">${esc(containerName(s))}</span>` : '';
     return `
     <div class="card status-${s.status}" data-id="${esc(s.session_id)}">
       <div class="card-header">
-        <div class="card-project">${esc(projectName(s.project_dir))}</div>
+        <div class="card-project">${esc(projectName(s.project_dir))}${badge}</div>
         <div class="card-status">
           <span class="dot dot-${s.status}"></span>
           ${s.status}
@@ -676,7 +700,8 @@ async function showChat(sessionId) {
 
   // Show/hide input based on whether we have a tmux pane
   const inputArea = document.getElementById('chat-input-area');
-  inputArea.style.display = session.tmux_pane ? 'flex' : 'none';
+  const canSend = !!session.tmux_pane;
+  inputArea.style.display = canSend ? 'flex' : 'none';
 
   document.getElementById('chat-messages').innerHTML = '<div class="chat-loading">Loading conversation...</div>';
   document.getElementById('modal-overlay').classList.add('visible');
@@ -685,7 +710,7 @@ async function showChat(sessionId) {
   renderChat(messages);
 
   // Focus input
-  if (session.tmux_pane) {
+  if (canSend) {
     document.getElementById('chat-input').focus();
   }
 }

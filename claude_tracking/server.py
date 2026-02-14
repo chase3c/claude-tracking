@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import subprocess
+import threading
 import urllib.parse
 from pathlib import Path
 
@@ -17,6 +18,71 @@ def get_db():
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA busy_timeout=3000")
     return db
+
+
+def parse_transcript_lines(raw_lines):
+    """Parse transcript JSONL lines into chat messages."""
+    messages = []
+    tool_names = {}  # tool_use_id -> tool name
+    for line in raw_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        msg = entry.get("message", entry)
+        role = msg.get("role", "")
+        if role not in ("user", "assistant"):
+            continue
+
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            text_parts = []
+            has_task_result = False
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        text = block.get("text", "").strip()
+                        if text:
+                            text_parts.append(text)
+                    elif block.get("type") == "tool_use":
+                        name = block.get("name", "unknown")
+                        tool_id = block.get("id", "")
+                        if tool_id:
+                            tool_names[tool_id] = name
+                        text_parts.append(f"[Tool: {name}]")
+                    elif block.get("type") == "tool_result":
+                        tool_id = block.get("tool_use_id", "")
+                        tool_name = tool_names.get(tool_id, "")
+                        if tool_name in ("Task", "ExitPlanMode"):
+                            result_content = block.get("content", "")
+                            if isinstance(result_content, str) and result_content.strip():
+                                text_parts.append(result_content.strip())
+                                has_task_result = True
+                            elif isinstance(result_content, list):
+                                for rb in result_content:
+                                    if isinstance(rb, dict) and rb.get("type") == "text":
+                                        t = rb.get("text", "").strip()
+                                        if t:
+                                            text_parts.append(t)
+                                            has_task_result = True
+                elif isinstance(block, str):
+                    if block.strip():
+                        text_parts.append(block.strip())
+            content = "\n".join(text_parts)
+            # Task results come in user messages but are really assistant output
+            if has_task_result and role == "user":
+                role = "assistant"
+        elif isinstance(content, str):
+            content = content.strip()
+
+        if content:
+            messages.append({"role": role, "content": content})
+
+    return messages
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -114,7 +180,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             db = get_db()
             row = db.execute(
-                "SELECT transcript_path FROM sessions WHERE session_id = ?",
+                "SELECT transcript_path, source FROM sessions WHERE session_id = ?",
                 (session_id,),
             ).fetchone()
             db.close()
@@ -124,71 +190,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             path = row["transcript_path"]
-            if not os.path.exists(path):
+            source = row["source"] or "host"
+            raw_lines = None
+
+            if os.path.exists(path):
+                with open(path) as f:
+                    raw_lines = f.readlines()
+            elif source.startswith("container:"):
+                # Transcript is inside the container volume — read via docker
+                container_id = source[len("container:"):]
+                # Map host path back to container path
+                container_path = path
+                for bd in load_bridge_dirs():
+                    if path.startswith(bd):
+                        container_path = "/workspace" + path[len(bd):]
+                        break
+                # Also check unmapped paths (e.g. /home/node/.claude/...)
+                try:
+                    result = subprocess.run(
+                        ["docker", "exec", container_id, "cat", container_path],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if result.returncode == 0 and result.stdout:
+                        raw_lines = result.stdout.splitlines(keepends=True)
+                except Exception:
+                    pass
+
+            if not raw_lines:
                 self.send_json([], 200)
                 return
 
-            messages = []
-            tool_names = {}  # tool_use_id -> tool name
-            with open(path) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        entry = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    msg = entry.get("message", entry)
-                    role = msg.get("role", "")
-                    if role not in ("user", "assistant"):
-                        continue
-
-                    content = msg.get("content", "")
-                    if isinstance(content, list):
-                        text_parts = []
-                        has_task_result = False
-                        for block in content:
-                            if isinstance(block, dict):
-                                if block.get("type") == "text":
-                                    text = block.get("text", "").strip()
-                                    if text:
-                                        text_parts.append(text)
-                                elif block.get("type") == "tool_use":
-                                    name = block.get("name", "unknown")
-                                    tool_id = block.get("id", "")
-                                    if tool_id:
-                                        tool_names[tool_id] = name
-                                    text_parts.append(f"[Tool: {name}]")
-                                elif block.get("type") == "tool_result":
-                                    tool_id = block.get("tool_use_id", "")
-                                    tool_name = tool_names.get(tool_id, "")
-                                    if tool_name in ("Task", "ExitPlanMode"):
-                                        result_content = block.get("content", "")
-                                        if isinstance(result_content, str) and result_content.strip():
-                                            text_parts.append(result_content.strip())
-                                            has_task_result = True
-                                        elif isinstance(result_content, list):
-                                            for rb in result_content:
-                                                if isinstance(rb, dict) and rb.get("type") == "text":
-                                                    t = rb.get("text", "").strip()
-                                                    if t:
-                                                        text_parts.append(t)
-                                                        has_task_result = True
-                            elif isinstance(block, str):
-                                if block.strip():
-                                    text_parts.append(block.strip())
-                        content = "\n".join(text_parts)
-                        # Task results come in user messages but are really assistant output
-                        if has_task_result and role == "user":
-                            role = "assistant"
-                    elif isinstance(content, str):
-                        content = content.strip()
-
-                    if content:
-                        messages.append({"role": role, "content": content})
-
+            messages = parse_transcript_lines(raw_lines)
             self.send_json(messages)
         except Exception as e:
             self.send_json({"error": str(e)}, 500)
@@ -272,52 +304,139 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+OFFSETS_PATH = os.path.expanduser("~/.claude/tracking-bridge-offsets.json")
+BRIDGE_DIRS_PATH = os.path.expanduser("~/.claude/tracking-bridge-dirs.json")
+
+
 def ensure_db():
+    from .track import init_db
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = sqlite3.connect(DB_PATH)
-    db.execute("PRAGMA journal_mode=WAL")
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            project_dir TEXT,
-            tmux_pane TEXT,
-            tmux_window TEXT,
-            tmux_session TEXT,
-            status TEXT DEFAULT 'active',
-            started_at TEXT,
-            last_activity TEXT,
-            last_event TEXT,
-            last_tool TEXT,
-            last_detail TEXT,
-            last_prompt TEXT,
-            prompt_count INTEGER DEFAULT 0,
-            tool_count INTEGER DEFAULT 0,
-            model TEXT,
-            transcript_path TEXT
-        )
-    """)
-    db.execute("""
-        CREATE TABLE IF NOT EXISTS events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT,
-            timestamp TEXT,
-            event_type TEXT,
-            tool_name TEXT,
-            detail TEXT
-        )
-    """)
-    db.commit()
+    init_db(db)
     db.close()
+
+
+def load_bridge_dirs():
+    """Load the list of directories to scan for bridge files."""
+    dirs = []
+    if os.path.exists(BRIDGE_DIRS_PATH):
+        try:
+            with open(BRIDGE_DIRS_PATH) as f:
+                dirs = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return dirs
+
+
+def save_bridge_dirs(dirs):
+    os.makedirs(os.path.dirname(BRIDGE_DIRS_PATH), exist_ok=True)
+    with open(BRIDGE_DIRS_PATH, "w") as f:
+        json.dump(dirs, f, indent=2)
+
+
+def load_offsets():
+    if os.path.exists(OFFSETS_PATH):
+        try:
+            with open(OFFSETS_PATH) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_offsets(offsets):
+    os.makedirs(os.path.dirname(OFFSETS_PATH), exist_ok=True)
+    with open(OFFSETS_PATH, "w") as f:
+        json.dump(offsets, f)
+
+
+def bridge_watcher(stop_event):
+    """Background thread that watches for container bridge event files."""
+    from .track import track
+
+    offsets = load_offsets()
+
+    while not stop_event.is_set():
+        try:
+            bridge_dirs = load_bridge_dirs()
+            for dir_path in bridge_dirs:
+                bridge_file = os.path.join(
+                    dir_path, ".claude-tracking-bridge", "events.jsonl"
+                )
+                if not os.path.exists(bridge_file):
+                    continue
+
+                file_size = os.path.getsize(bridge_file)
+                offset = offsets.get(bridge_file, 0)
+
+                if file_size <= offset:
+                    continue
+
+                with open(bridge_file) as f:
+                    f.seek(offset)
+                    new_data = f.read()
+                    new_offset = f.tell()
+
+                for line in new_data.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    data = event.get("data", {})
+                    container = event.get("container", "unknown")
+                    host_dir = event.get("host_dir", "")
+                    host_tmux_pane = event.get("host_tmux_pane", "")
+                    source = f"container:{container}"
+
+                    # Map container /workspace paths to host paths
+                    # Fall back to the bridge dir's parent if host_dir not set
+                    map_root = host_dir or dir_path
+                    cwd = data.get("cwd", "")
+                    if cwd.startswith("/workspace"):
+                        data["cwd"] = map_root + cwd[len("/workspace"):]
+                    tp = data.get("transcript_path", "")
+                    if tp.startswith("/workspace"):
+                        data["transcript_path"] = (
+                            map_root + tp[len("/workspace"):]
+                        )
+
+                    try:
+                        track(
+                            data, source=source,
+                            tmux_pane_override=host_tmux_pane or None,
+                        )
+                    except Exception:
+                        pass
+
+                offsets[bridge_file] = new_offset
+                save_offsets(offsets)
+
+        except Exception:
+            pass
+
+        stop_event.wait(2)
 
 
 def run_server(port=7860):
     ensure_db()
+
+    stop_event = threading.Event()
+    watcher = threading.Thread(
+        target=bridge_watcher, args=(stop_event,), daemon=True
+    )
+    watcher.start()
+
     server = http.server.HTTPServer(("127.0.0.1", port), Handler)
     print(f"Dashboard: http://localhost:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down.")
+        stop_event.set()
         server.shutdown()
 
 

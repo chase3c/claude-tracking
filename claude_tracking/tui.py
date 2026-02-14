@@ -6,12 +6,16 @@ import json
 import os
 import sqlite3
 import subprocess
+import threading
 from datetime import datetime
 
+from rich.table import Table as RichTable
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.containers import Grid, VerticalScroll
 from textual.reactive import reactive
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.screen import Screen
+from textual.widgets import Footer, Header, Static
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 REFRESH_SECONDS = 3
@@ -100,21 +104,27 @@ def format_activity(last_tool, last_detail, last_event):
     return f"{label} [cyan]{detail}[/]"
 
 
-def fetch_sessions():
+def fetch_sessions(show_all=False):
     if not os.path.exists(DB_PATH):
         return []
     try:
         db = sqlite3.connect(DB_PATH)
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA busy_timeout=1000")
-        rows = db.execute("""
+        if show_all:
+            where = ""
+        else:
+            where = "WHERE status NOT IN ('dismissed', 'ended')"
+        rows = db.execute(f"""
             SELECT * FROM sessions
-            WHERE status NOT IN ('dismissed', 'ended')
+            {where}
             ORDER BY
                 CASE status
                     WHEN 'active' THEN 0
                     WHEN 'waiting' THEN 1
                     WHEN 'idle' THEN 2
+                    WHEN 'ended' THEN 3
+                    WHEN 'dismissed' THEN 4
                 END,
                 last_activity DESC
         """).fetchall()
@@ -143,44 +153,274 @@ def fetch_events(session_id):
         return []
 
 
-def read_transcript(path, max_messages=3):
+def _read_transcript_lines(path, source="host"):
+    """Read raw lines from a transcript file, using docker exec for containers."""
+    if path and os.path.exists(path):
+        with open(path) as f:
+            return f.readlines()
+    if source.startswith("container:"):
+        container_id = source[len("container:"):]
+        try:
+            result = subprocess.run(
+                ["docker", "exec", container_id, "cat", path],
+                capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0 and result.stdout:
+                return result.stdout.splitlines(keepends=True)
+        except Exception:
+            pass
+    return []
+
+
+def read_transcript(path, max_messages=3, source="host"):
     """Read recent assistant text output from a transcript JSONL file."""
-    if not path or not os.path.exists(path):
+    if not path:
         return []
     messages = []
     try:
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                # Transcript entries wrap the message in an outer object
-                msg = entry.get("message", entry)
-                role = msg.get("role", "")
-                if role != "assistant":
-                    continue
-                content = msg.get("content", "")
-                if isinstance(content, list):
-                    text_parts = []
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text = block.get("text", "").strip()
-                            if text:
-                                text_parts.append(text)
-                    content = "\n".join(text_parts)
-                if content and content.strip():
-                    messages.append(content.strip())
+        for line in _read_transcript_lines(path, source):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Transcript entries wrap the message in an outer object
+            msg = entry.get("message", entry)
+            role = msg.get("role", "")
+            if role != "assistant":
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = block.get("text", "").strip()
+                        if text:
+                            text_parts.append(text)
+                content = "\n".join(text_parts)
+            if content and content.strip():
+                messages.append(content.strip())
     except Exception:
         return []
     return messages[-max_messages:]
 
 
-class DetailPanel(Static):
-    pass
+# ---------------------------------------------------------------------------
+# SessionCard — one tile per session
+# ---------------------------------------------------------------------------
+
+
+class SessionCard(Static):
+    """A card widget displaying a single session's status."""
+
+    session_data = reactive(dict, always_update=True)
+
+    def __init__(self, session: dict, **kwargs):
+        super().__init__(**kwargs)
+        self.session_data = session
+
+    def render(self):
+        s = self.session_data
+        if not s:
+            return ""
+
+        status = s.get("status", "unknown")
+        project = short_project(s.get("project_dir", ""))
+        activity = format_activity(
+            s.get("last_tool", ""),
+            s.get("last_detail", ""),
+            s.get("last_event", ""),
+        )
+        last_prompt = s.get("last_prompt", "")
+        prompts = s.get("prompt_count", 0)
+        tools = s.get("tool_count", 0)
+        last = time_ago(s.get("last_activity", ""))
+        status_label = STATUS_LABELS.get(status, status)
+
+        # Override activity for waiting sessions
+        if status == "waiting":
+            activity = "[bold #db6d28]\u26a0 NEEDS PERMISSION[/]"
+
+        # Use a Rich Table for left/right alignment
+        table = RichTable(
+            show_header=False, box=None, padding=(0, 0), expand=True,
+        )
+        table.add_column("left", ratio=1, no_wrap=True, overflow="ellipsis")
+        table.add_column("right", justify="right", no_wrap=True)
+
+        # Line 1: project name + status
+        table.add_row(f"[bold]{project}[/]", status_label)
+
+        # Line 2: current activity
+        table.add_row(activity if activity else "[dim]\u2014[/]", "")
+
+        # Line 3: last prompt (truncated, dim)
+        if last_prompt:
+            prompt_text = last_prompt[:50] + ("\u2026" if len(last_prompt) > 50 else "")
+            table.add_row(f'[dim]"{prompt_text}"[/]', "")
+
+        # Line 4: prompt/tool counts + time ago
+        table.add_row(f"[dim]P:{prompts} T:{tools}[/]", f"[dim]{last}[/]")
+
+        return table
+
+    def watch_session_data(self, data: dict) -> None:
+        for cls in ("status-active", "status-idle", "status-waiting", "status-ended"):
+            self.remove_class(cls)
+        status = data.get("status", "unknown") if data else "unknown"
+        self.add_class(f"status-{status}")
+
+
+# ---------------------------------------------------------------------------
+# DetailScreen — full-screen overlay for a single session
+# ---------------------------------------------------------------------------
+
+
+class DetailScreen(Screen):
+    """Full-screen detail view showing session info and transcript."""
+
+    BINDINGS = [
+        Binding("escape", "go_back", "Back"),
+        Binding("q", "go_back", "Back", show=False),
+        Binding("g", "jump", "Jump to pane"),
+        Binding("d", "dismiss_session", "Dismiss"),
+        Binding("r", "refresh", "Refresh"),
+        Binding("j", "scroll_down", "Down", show=False),
+        Binding("k", "scroll_up", "Up", show=False),
+        Binding("down", "scroll_down", "Down", show=False),
+        Binding("up", "scroll_up", "Up", show=False),
+    ]
+
+    CSS = """
+    DetailScreen {
+        background: $surface;
+    }
+    #detail-header {
+        padding: 1 2;
+        background: $panel;
+        border-bottom: tall $accent;
+        height: auto;
+    }
+    #detail-scroll {
+        height: 1fr;
+    }
+    #detail-body {
+        padding: 1 2;
+        height: auto;
+    }
+    """
+
+    def __init__(self, session_id: str, **kwargs):
+        super().__init__(**kwargs)
+        self.session_id = session_id
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Static(id="detail-header")
+        yield VerticalScroll(Static(id="detail-body"), id="detail-scroll")
+        yield Footer()
+
+    def on_mount(self):
+        self._refresh_detail()
+        self._timer = self.set_interval(REFRESH_SECONDS, self._refresh_detail)
+
+    def _refresh_detail(self):
+        sessions = fetch_sessions(show_all=True)
+        session = next(
+            (s for s in sessions if s["session_id"] == self.session_id), None
+        )
+        if not session:
+            self.query_one("#detail-header", Static).update(
+                "[dim]Session not found[/]"
+            )
+            return
+
+        # Header
+        lines = []
+        status_label = STATUS_LABELS.get(
+            session.get("status", ""), session.get("status", "")
+        )
+        sid_short = self.session_id[:12]
+        lines.append(
+            f"[bold]{short_project(session.get('project_dir', ''))}[/]"
+            f"  {status_label}  [dim]{sid_short}[/]"
+        )
+        if session.get("model"):
+            lines.append(f"[dim]Model:[/] {session['model']}")
+        if session.get("tmux_window"):
+            pane = session.get("tmux_pane", "?")
+            lines.append(f"[dim]Tmux:[/] {session['tmux_window']} ({pane})")
+        if session.get("last_prompt"):
+            prompt = session["last_prompt"][:100]
+            lines.append(f'[dim]Task:[/] "{prompt}"')
+
+        self.query_one("#detail-header", Static).update("\n".join(lines))
+
+        # Body — transcript
+        transcript = session.get("transcript_path", "")
+        source = session.get("source", "host") or "host"
+        recent_output = read_transcript(transcript, max_messages=20, source=source)
+
+        body_lines = []
+        if recent_output:
+            body_lines.append("[bold]Transcript[/]\n")
+            for msg in recent_output:
+                preview = msg.replace("\n", " ")
+                if len(preview) > 500:
+                    preview = preview[:500] + "\u2026"
+                body_lines.append(f"  [white]{preview}[/]\n")
+        else:
+            body_lines.append("[dim]No transcript available[/]")
+
+        self.query_one("#detail-body", Static).update("\n".join(body_lines))
+
+    def action_go_back(self):
+        self.dismiss()
+
+    def action_scroll_down(self):
+        self.query_one("#detail-scroll", VerticalScroll).scroll_down()
+
+    def action_scroll_up(self):
+        self.query_one("#detail-scroll", VerticalScroll).scroll_up()
+
+    def action_jump(self):
+        try:
+            db = sqlite3.connect(DB_PATH)
+            db.row_factory = sqlite3.Row
+            row = db.execute(
+                "SELECT tmux_pane FROM sessions WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            db.close()
+            if row and row["tmux_pane"]:
+                pane = row["tmux_pane"]
+                subprocess.run(["tmux", "select-window", "-t", pane], timeout=2)
+                subprocess.run(["tmux", "select-pane", "-t", pane], timeout=2)
+        except Exception:
+            pass
+
+    def action_dismiss_session(self):
+        try:
+            db = sqlite3.connect(DB_PATH)
+            db.execute(
+                "UPDATE sessions SET status = 'dismissed' WHERE session_id = ?",
+                (self.session_id,),
+            )
+            db.commit()
+            db.close()
+            self.dismiss()
+        except Exception:
+            pass
+
+    def action_refresh(self):
+        self._refresh_detail()
+
+
+# ---------------------------------------------------------------------------
+# SessionTracker — main app with tiled card grid
+# ---------------------------------------------------------------------------
 
 
 class SessionTracker(App):
@@ -188,18 +428,53 @@ class SessionTracker(App):
     Screen {
         background: $surface;
     }
-    #sessions-table {
+    #grid-scroll {
         height: 1fr;
     }
-    #detail {
+    #card-grid {
+        grid-size: 3;
+        grid-gutter: 1;
+        padding: 1;
         height: auto;
-        max-height: 45%;
-        border-top: tall $accent;
+    }
+    SessionCard {
+        height: auto;
+        min-height: 5;
         padding: 1 2;
+        border: round $secondary;
         background: $panel;
     }
-    #detail.hidden {
-        display: none;
+    SessionCard.status-active {
+        border: round green;
+    }
+    SessionCard.status-waiting {
+        border: round #db6d28;
+    }
+    SessionCard.status-idle {
+        border: round yellow;
+    }
+    SessionCard.status-ended {
+        border: round #666666;
+    }
+    SessionCard.card-selected {
+        border: double $accent;
+        background: $boost;
+    }
+    SessionCard.card-selected.status-active {
+        border: double green;
+        background: $boost;
+    }
+    SessionCard.card-selected.status-waiting {
+        border: double #db6d28;
+        background: $boost;
+    }
+    SessionCard.card-selected.status-idle {
+        border: double yellow;
+        background: $boost;
+    }
+    SessionCard.card-selected.status-ended {
+        border: double #666666;
+        background: $boost;
     }
     #status-bar {
         height: 1;
@@ -212,150 +487,164 @@ class SessionTracker(App):
     TITLE = "Claude Sessions"
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("j", "cursor_down", "Down", show=False),
-        Binding("k", "cursor_up", "Up", show=False),
+        Binding("h", "move_left", "Left", show=False),
+        Binding("l", "move_right", "Right", show=False),
+        Binding("j", "move_down", "Down", show=False),
+        Binding("k", "move_up", "Up", show=False),
+        Binding("left", "move_left", "Left", show=False),
+        Binding("right", "move_right", "Right", show=False),
+        Binding("down", "move_down", "Down", show=False),
+        Binding("up", "move_up", "Up", show=False),
+        Binding("space", "open_detail", "Detail"),
+        Binding("enter", "open_detail", "Detail", show=False),
         Binding("g", "jump", "Jump to pane"),
-        Binding("space", "toggle_detail", "Details"),
         Binding("d", "dismiss", "Dismiss"),
         Binding("a", "show_all", "Show ended"),
         Binding("r", "force_refresh", "Refresh"),
     ]
 
     show_ended = reactive(False)
-    selected_session_id = reactive("")
+    selected_index = reactive(0)
+
+    def __init__(self):
+        super().__init__()
+        self._session_ids: list[str] = []
+        self._num_columns = 3
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield DataTable(id="sessions-table")
-        yield DetailPanel(id="detail", classes="hidden")
+        yield VerticalScroll(Grid(id="card-grid"), id="grid-scroll")
         yield Static(id="status-bar")
         yield Footer()
 
-    def on_mount(self):
-        table = self.query_one("#sessions-table", DataTable)
-        table.cursor_type = "row"
-        table.add_columns("", "Project", "Activity", "P", "T", "Last Active")
-        self.refresh_data()
+    async def on_mount(self):
+        self._num_columns = self._compute_columns()
+        grid = self.query_one("#card-grid", Grid)
+        grid.styles.grid_size_columns = self._num_columns
+
+        # Start bridge watcher for container sessions
+        from .server import bridge_watcher
+        self._bridge_stop = threading.Event()
+        self._bridge_thread = threading.Thread(
+            target=bridge_watcher, args=(self._bridge_stop,), daemon=True
+        )
+        self._bridge_thread.start()
+
+        await self.refresh_data()
         self.set_interval(REFRESH_SECONDS, self.refresh_data)
 
-    def refresh_data(self):
-        table = self.query_one("#sessions-table", DataTable)
-        sessions = fetch_sessions()
+    def on_resize(self, _event):
+        num_cols = self._compute_columns()
+        if num_cols != self._num_columns:
+            self._num_columns = num_cols
+            grid = self.query_one("#card-grid", Grid)
+            grid.styles.grid_size_columns = num_cols
 
-        counts = {}
+    def _compute_columns(self) -> int:
+        width = self.size.width
+        if width < 80:
+            return 1
+        if width < 120:
+            return 2
+        return 3
+
+    async def refresh_data(self):
+        sessions = fetch_sessions(show_all=self.show_ended)
+
+        # Status bar summary
+        counts: dict[str, int] = {}
         for s in sessions:
             counts[s["status"]] = counts.get(s["status"], 0) + 1
 
         summary_parts = []
-        for status in ("active", "waiting", "idle", "ended"):
+        for status in ("active", "waiting", "idle", "ended", "dismissed"):
             if counts.get(status, 0) > 0:
                 summary_parts.append(f"{counts[status]} {status}")
         summary = " \u00b7 ".join(summary_parts) if summary_parts else "No sessions"
+        mode = "  \u00b7  [bold]Showing all[/]" if self.show_ended else ""
 
         self.query_one("#status-bar", Static).update(
-            f" {summary}  \u00b7  Refreshing every {REFRESH_SECONDS}s"
+            f" {summary}  \u00b7  Refreshing every {REFRESH_SECONDS}s{mode}"
         )
 
-        try:
-            cursor_row = table.cursor_row
-        except Exception:
-            cursor_row = 0
+        # Preserve selection by session_id
+        old_selected_id = None
+        if self._session_ids and 0 <= self.selected_index < len(self._session_ids):
+            old_selected_id = self._session_ids[self.selected_index]
 
-        table.clear()
-        self._session_ids = []
+        new_session_ids = [s["session_id"] for s in sessions]
+        grid = self.query_one("#card-grid", Grid)
 
-        for s in sessions:
-            status = s.get("status", "unknown")
-            dot = STATUS_DOTS.get(status, "?")
-            project = short_project(s.get("project_dir", ""))
-            activity = format_activity(
-                s.get("last_tool", ""),
-                s.get("last_detail", ""),
-                s.get("last_event", ""),
+        if new_session_ids == self._session_ids:
+            # Same sessions in same order — update in-place
+            cards = list(grid.query(SessionCard))
+            for card, session in zip(cards, sessions):
+                card.session_data = session
+        else:
+            # Sessions changed — rebuild grid
+            await grid.remove_children()
+            new_cards = [SessionCard(session) for session in sessions]
+            if new_cards:
+                await grid.mount_all(new_cards)
+            self._session_ids = new_session_ids
+
+        # Restore selection
+        if old_selected_id and old_selected_id in self._session_ids:
+            self.selected_index = self._session_ids.index(old_selected_id)
+        elif self._session_ids:
+            self.selected_index = min(
+                self.selected_index, len(self._session_ids) - 1
             )
-            prompts = str(s.get("prompt_count", 0))
-            tools = str(s.get("tool_count", 0))
-            last = time_ago(s.get("last_activity", ""))
+        else:
+            self.selected_index = 0
 
-            table.add_row(dot, project, activity, prompts, tools, last)
-            self._session_ids.append(s["session_id"])
+        self._update_selection()
 
-        if self._session_ids and cursor_row < len(self._session_ids):
-            table.move_cursor(row=cursor_row)
-
-        detail = self.query_one("#detail", DetailPanel)
-        if "hidden" not in detail.classes and self.selected_session_id:
-            self._update_detail(self.selected_session_id)
-
-    def on_data_table_row_selected(self, event):
-        """Enter key on a row — jump to that tmux pane."""
-        self.action_jump()
-
-    def on_data_table_row_highlighted(self, event):
-        if hasattr(self, "_session_ids") and event.cursor_row < len(self._session_ids):
-            self.selected_session_id = self._session_ids[event.cursor_row]
-            detail = self.query_one("#detail", DetailPanel)
-            if "hidden" not in detail.classes:
-                self._update_detail(self.selected_session_id)
+    def _update_selection(self):
+        grid = self.query_one("#card-grid", Grid)
+        cards = list(grid.query(SessionCard))
+        for i, card in enumerate(cards):
+            if i == self.selected_index:
+                card.add_class("card-selected")
+                card.scroll_visible()
+            else:
+                card.remove_class("card-selected")
 
     def _get_selected_session_id(self):
-        table = self.query_one("#sessions-table", DataTable)
-        if not hasattr(self, "_session_ids") or not self._session_ids:
-            return None
-        try:
-            row = table.cursor_row
-            if row < len(self._session_ids):
-                return self._session_ids[row]
-        except Exception:
-            pass
+        if self._session_ids and 0 <= self.selected_index < len(self._session_ids):
+            return self._session_ids[self.selected_index]
         return None
 
-    def _update_detail(self, session_id):
-        detail = self.query_one("#detail", DetailPanel)
-        events = fetch_events(session_id)
+    # -- Navigation ----------------------------------------------------------
 
-        sessions = fetch_sessions()
-        session = next((s for s in sessions if s["session_id"] == session_id), None)
-        if not session:
-            detail.update("[dim]Session not found[/]")
-            return
+    def action_move_left(self):
+        if self.selected_index > 0:
+            self.selected_index -= 1
+            self._update_selection()
 
-        lines = []
-        sid_short = session_id[:12]
-        status_label = STATUS_LABELS.get(session.get("status", ""), session.get("status", ""))
-        lines.append(f"[bold]{short_project(session.get('project_dir', ''))}[/]  {status_label}  [dim]{sid_short}[/]")
+    def action_move_right(self):
+        if self.selected_index < len(self._session_ids) - 1:
+            self.selected_index += 1
+            self._update_selection()
 
-        if session.get("model"):
-            lines.append(f"[dim]Model:[/] {session['model']}")
-        if session.get("tmux_window"):
-            pane = session.get("tmux_pane", "?")
-            lines.append(f"[dim]Tmux:[/] {session['tmux_window']} ({pane})")
-        if session.get("last_prompt"):
-            prompt = session["last_prompt"][:100]
-            lines.append(f'[dim]Task:[/] "{prompt}"')
-        lines.append("")
+    def action_move_down(self):
+        new = self.selected_index + self._num_columns
+        if new < len(self._session_ids):
+            self.selected_index = new
+            self._update_selection()
 
-        # Show recent Claude output from transcript
-        transcript = session.get("transcript_path", "")
-        recent_output = read_transcript(transcript, max_messages=5)
-        if recent_output:
-            lines.append("[bold]Recent output[/]")
-            for msg in recent_output:
-                preview = msg.replace("\n", " ")
-                if len(preview) > 300:
-                    preview = preview[:300] + "\u2026"
-                lines.append(f"  [white]{preview}[/]")
-                lines.append("")
+    def action_move_up(self):
+        new = self.selected_index - self._num_columns
+        if new >= 0:
+            self.selected_index = new
+            self._update_selection()
 
-        detail.update("\n".join(lines))
+    # -- Actions -------------------------------------------------------------
 
-    def action_cursor_down(self):
-        table = self.query_one("#sessions-table", DataTable)
-        table.action_cursor_down()
-
-    def action_cursor_up(self):
-        table = self.query_one("#sessions-table", DataTable)
-        table.action_cursor_up()
+    def action_open_detail(self):
+        sid = self._get_selected_session_id()
+        if sid:
+            self.push_screen(DetailScreen(sid))
 
     def action_jump(self):
         sid = self._get_selected_session_id()
@@ -375,18 +664,7 @@ class SessionTracker(App):
         except Exception:
             pass
 
-    def action_toggle_detail(self):
-        detail = self.query_one("#detail", DetailPanel)
-        if "hidden" in detail.classes:
-            detail.remove_class("hidden")
-            sid = self._get_selected_session_id()
-            if sid:
-                self.selected_session_id = sid
-                self._update_detail(sid)
-        else:
-            detail.add_class("hidden")
-
-    def action_dismiss(self):
+    async def action_dismiss(self):
         sid = self._get_selected_session_id()
         if not sid:
             return
@@ -398,16 +676,16 @@ class SessionTracker(App):
             )
             db.commit()
             db.close()
-            self.refresh_data()
+            await self.refresh_data()
         except Exception:
             pass
 
-    def action_show_all(self):
+    async def action_show_all(self):
         self.show_ended = not self.show_ended
-        self.refresh_data()
+        await self.refresh_data()
 
-    def action_force_refresh(self):
-        self.refresh_data()
+    async def action_force_refresh(self):
+        await self.refresh_data()
 
 
 if __name__ == "__main__":
