@@ -1,8 +1,11 @@
 # Polish UX
 
-## Next up
+## Done
 
-- [ ] Fix web dashboard "Send" — messages aren't actually reaching the Claude session via tmux send-keys. Debug the full flow: API endpoint → tmux pane lookup → send-keys -l + Enter.
+- [x] Fix web dashboard "Send" — added error handling to tmux send-keys (pre-flight pane check, capture stderr, surface errors in chat UI)
+- [x] Show Task and plan output in web dashboard transcript
+
+## Next up
 
 ## Ideas
 
