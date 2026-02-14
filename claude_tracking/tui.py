@@ -214,7 +214,7 @@ class SessionTracker(App):
         Binding("q", "quit", "Quit"),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
-        Binding("enter", "jump", "Jump to pane"),
+        Binding("g", "jump", "Jump to pane"),
         Binding("space", "toggle_detail", "Details"),
         Binding("d", "dismiss", "Dismiss"),
         Binding("a", "show_all", "Show ended"),
@@ -286,6 +286,10 @@ class SessionTracker(App):
         detail = self.query_one("#detail", DetailPanel)
         if "hidden" not in detail.classes and self.selected_session_id:
             self._update_detail(self.selected_session_id)
+
+    def on_data_table_row_selected(self, event):
+        """Enter key on a row — jump to that tmux pane."""
+        self.action_jump()
 
     def on_data_table_row_highlighted(self, event):
         if hasattr(self, "_session_ids") and event.cursor_row < len(self._session_ids):
