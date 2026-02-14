@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "claude-tracking"
+version = "0.1.0"
+description = "Monitor all running Claude Code sessions from one dashboard"
+requires-python = ">=3.9"
+dependencies = [
+    "textual>=0.85.0",
+]
+
+[project.scripts]
+claude-track = "claude_tracking.cli:main"
+
+[tool.setuptools.package-data]
+claude_tracking = ["dashboard.html"]

@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
 """Claude Code session tracking hook.
 
 Reads hook event JSON from stdin and records session state to SQLite.
-Designed to be called from Claude Code hooks on every event.
+Called via: claude-track hook
 """
 import json
 import os
@@ -10,7 +9,6 @@ import sqlite3
 import subprocess
 import sys
 from datetime import datetime
-from pathlib import Path
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 
@@ -51,7 +49,6 @@ def init_db(db):
 
 
 def get_tmux_info():
-    """Capture tmux pane, window, and session info from environment."""
     pane = os.environ.get("TMUX_PANE", "")
     window = ""
     session = ""
@@ -73,7 +70,6 @@ def get_tmux_info():
 
 
 def extract_detail(event_name, tool_name, tool_input):
-    """Build a human-readable detail string from tool input."""
     if event_name == "UserPromptSubmit":
         return ""
     if tool_name == "Bash":
@@ -120,13 +116,11 @@ def track(data):
     db = sqlite3.connect(DB_PATH)
     init_db(db)
 
-    # Check if session exists
     existing = db.execute(
         "SELECT session_id FROM sessions WHERE session_id = ?", (session_id,)
     ).fetchone()
 
     if existing:
-        # Build dynamic update
         updates = ["last_activity = ?", "last_event = ?", "status = ?"]
         params = [now, event_name, status]
 
@@ -187,7 +181,6 @@ def track(data):
             ),
         )
 
-    # Log event
     db.execute(
         "INSERT INTO events (session_id, timestamp, event_type, tool_name, detail) VALUES (?, ?, ?, ?, ?)",
         (session_id, now, event_name, tool_name, detail),
@@ -197,11 +190,15 @@ def track(data):
     db.close()
 
 
-if __name__ == "__main__":
+def handle_hook():
+    """Entry point for the hook command."""
     try:
         data = json.load(sys.stdin)
         track(data)
     except Exception as e:
-        # Never let tracking errors break Claude Code
         print(f"tracking error: {e}", file=sys.stderr)
     sys.exit(0)
+
+
+if __name__ == "__main__":
+    handle_hook()

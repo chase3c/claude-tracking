@@ -1,8 +1,6 @@
-#!/usr/bin/env python3
 """Claude Code session tracker — Terminal UI.
 
-Run this in a tmux pane to monitor all your Claude Code sessions.
-Requires: pip install textual
+Run in a tmux pane to monitor all your Claude Code sessions.
 """
 import os
 import sqlite3
@@ -11,7 +9,6 @@ from datetime import datetime
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable, Footer, Header, Static
 
@@ -19,10 +16,10 @@ DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 REFRESH_SECONDS = 3
 
 STATUS_DOTS = {
-    "active": "[green]●[/]",
-    "idle": "[yellow]●[/]",
-    "waiting": "[#db6d28]●[/]",
-    "ended": "[dim]●[/]",
+    "active": "[green]\u25cf[/]",
+    "idle": "[yellow]\u25cf[/]",
+    "waiting": "[#db6d28]\u25cf[/]",
+    "ended": "[dim]\u25cf[/]",
 }
 
 STATUS_LABELS = {
@@ -70,7 +67,7 @@ def format_activity(last_tool, last_detail, last_event):
         return "[#db6d28]Needs permission[/]"
     if last_event == "UserPromptSubmit":
         if last_detail:
-            text = last_detail[:60] + ("…" if len(last_detail) > 60 else "")
+            text = last_detail[:60] + ("\u2026" if len(last_detail) > 60 else "")
             return f'[dim]Prompt:[/] "{text}"'
         return "[dim]User prompted[/]"
     if not last_tool:
@@ -92,11 +89,10 @@ def format_activity(last_tool, last_detail, last_event):
         return label
 
     detail = last_detail
-    # Shorten file paths
     if "/" in detail and last_tool in ("Edit", "Write", "Read"):
         detail = detail.split("/")[-1]
     if len(detail) > 50:
-        detail = detail[:50] + "…"
+        detail = detail[:50] + "\u2026"
 
     if last_tool == "Bash":
         return f"{label} [cyan]`{detail}`[/]"
@@ -207,7 +203,6 @@ class SessionTracker(App):
         table = self.query_one("#sessions-table", DataTable)
         sessions = fetch_sessions()
 
-        # Count by status
         counts = {}
         for s in sessions:
             counts[s["status"]] = counts.get(s["status"], 0) + 1
@@ -216,13 +211,12 @@ class SessionTracker(App):
         for status in ("active", "waiting", "idle", "ended"):
             if counts.get(status, 0) > 0:
                 summary_parts.append(f"{counts[status]} {status}")
-        summary = " · ".join(summary_parts) if summary_parts else "No sessions"
+        summary = " \u00b7 ".join(summary_parts) if summary_parts else "No sessions"
 
         self.query_one("#status-bar", Static).update(
-            f" {summary}  ·  Refreshing every {REFRESH_SECONDS}s"
+            f" {summary}  \u00b7  Refreshing every {REFRESH_SECONDS}s"
         )
 
-        # Remember cursor position
         try:
             cursor_row = table.cursor_row
         except Exception:
@@ -247,11 +241,9 @@ class SessionTracker(App):
             table.add_row(dot, project, activity, prompts, tools, last)
             self._session_ids.append(s["session_id"])
 
-        # Restore cursor
         if self._session_ids and cursor_row < len(self._session_ids):
             table.move_cursor(row=cursor_row)
 
-        # Update detail panel if visible
         detail = self.query_one("#detail", DetailPanel)
         if "hidden" not in detail.classes and self.selected_session_id:
             self._update_detail(self.selected_session_id)
@@ -279,7 +271,6 @@ class SessionTracker(App):
         detail = self.query_one("#detail", DetailPanel)
         events = fetch_events(session_id)
 
-        # Get session info
         sessions = fetch_sessions()
         session = next((s for s in sessions if s["session_id"] == session_id), None)
         if not session:
@@ -311,15 +302,15 @@ class SessionTracker(App):
                         ts = dt.strftime("%H:%M:%S")
                     except Exception:
                         ts = ""
-                etype = ev.get("event_type", "")
                 tool = ev.get("tool_name", "")
                 evdetail = ev.get("detail", "")
                 if len(evdetail) > 70:
-                    evdetail = evdetail[:70] + "…"
+                    evdetail = evdetail[:70] + "\u2026"
 
                 if tool:
                     lines.append(f"  [dim]{ts}[/]  {tool:<8} [cyan]{evdetail}[/]")
                 else:
+                    etype = ev.get("event_type", "")
                     lines.append(f"  [dim]{ts}[/]  {etype}")
 
         detail.update("\n".join(lines))

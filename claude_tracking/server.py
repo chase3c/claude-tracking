@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-"""Local web server for the Claude Code session dashboard.
-
-Serves the HTML dashboard and provides API endpoints for session data.
-Uses only Python stdlib — no dependencies.
-"""
+"""Local web server for the Claude Code session dashboard."""
 import http.server
 import json
 import os
@@ -14,7 +9,6 @@ from pathlib import Path
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 DASHBOARD_PATH = Path(__file__).parent / "dashboard.html"
-PORT = 7860
 
 
 def get_db():
@@ -132,8 +126,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, format, *args):
-        pass  # quiet
+    def log_message(self, *_args):
+        pass
 
 
 def ensure_db():
@@ -173,12 +167,16 @@ def ensure_db():
     db.close()
 
 
-if __name__ == "__main__":
+def run_server(port=7860):
     ensure_db()
-    server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
-    print(f"Dashboard: http://localhost:{PORT}")
+    server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+    print(f"Dashboard: http://localhost:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nShutting down.")
         server.shutdown()
+
+
+if __name__ == "__main__":
+    run_server()
