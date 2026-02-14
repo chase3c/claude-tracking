@@ -333,37 +333,15 @@ class SessionTracker(App):
 
         # Show recent Claude output from transcript
         transcript = session.get("transcript_path", "")
-        recent_output = read_transcript(transcript, max_messages=2)
+        recent_output = read_transcript(transcript, max_messages=5)
         if recent_output:
             lines.append("[bold]Recent output[/]")
             for msg in recent_output:
-                # Truncate long messages and indent
                 preview = msg.replace("\n", " ")
-                if len(preview) > 200:
-                    preview = preview[:200] + "\u2026"
+                if len(preview) > 300:
+                    preview = preview[:300] + "\u2026"
                 lines.append(f"  [white]{preview}[/]")
-            lines.append("")
-
-        if events:
-            lines.append("[bold]Recent activity[/]")
-            for ev in events[:10]:
-                ts = ""
-                if ev.get("timestamp"):
-                    try:
-                        dt = datetime.fromisoformat(ev["timestamp"])
-                        ts = dt.strftime("%H:%M:%S")
-                    except Exception:
-                        ts = ""
-                tool = ev.get("tool_name", "")
-                evdetail = ev.get("detail", "")
-                if len(evdetail) > 70:
-                    evdetail = evdetail[:70] + "\u2026"
-
-                if tool:
-                    lines.append(f"  [dim]{ts}[/]  {tool:<8} [cyan]{evdetail}[/]")
-                else:
-                    etype = ev.get("event_type", "")
-                    lines.append(f"  [dim]{ts}[/]  {etype}")
+                lines.append("")
 
         detail.update("\n".join(lines))
 
