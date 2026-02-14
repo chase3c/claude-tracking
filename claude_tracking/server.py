@@ -28,6 +28,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith("/api/events/"):
             session_id = urllib.parse.unquote(self.path[len("/api/events/"):])
             self.serve_events(session_id)
+        elif self.path.startswith("/api/transcript/"):
+            session_id = urllib.parse.unquote(self.path[len("/api/transcript/"):])
+            self.serve_transcript(session_id)
         else:
             self.send_error(404)
 
@@ -38,6 +41,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path.startswith("/api/dismiss/"):
             session_id = urllib.parse.unquote(self.path[len("/api/dismiss/"):])
             self.dismiss_session(session_id)
+        elif self.path.startswith("/api/send/"):
+            session_id = urllib.parse.unquote(self.path[len("/api/send/"):])
+            self.send_to_session(session_id)
         else:
             self.send_error(404)
 
@@ -101,6 +107,99 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "pane": pane})
             else:
                 self.send_json({"ok": False, "error": "No tmux pane recorded"}, 404)
+        except Exception as e:
+            self.send_json({"ok": False, "error": str(e)}, 500)
+
+    def serve_transcript(self, session_id):
+        try:
+            db = get_db()
+            row = db.execute(
+                "SELECT transcript_path FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            db.close()
+
+            if not row or not row["transcript_path"]:
+                self.send_json([], 200)
+                return
+
+            path = row["transcript_path"]
+            if not os.path.exists(path):
+                self.send_json([], 200)
+                return
+
+            messages = []
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        entry = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+
+                    msg = entry.get("message", entry)
+                    role = msg.get("role", "")
+                    if role not in ("user", "assistant"):
+                        continue
+
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict):
+                                if block.get("type") == "text":
+                                    text = block.get("text", "").strip()
+                                    if text:
+                                        text_parts.append(text)
+                                elif block.get("type") == "tool_use":
+                                    name = block.get("name", "unknown")
+                                    text_parts.append(f"[Tool: {name}]")
+                                elif block.get("type") == "tool_result":
+                                    continue
+                            elif isinstance(block, str):
+                                if block.strip():
+                                    text_parts.append(block.strip())
+                        content = "\n".join(text_parts)
+                    elif isinstance(content, str):
+                        content = content.strip()
+
+                    if content:
+                        messages.append({"role": role, "content": content})
+
+            self.send_json(messages)
+        except Exception as e:
+            self.send_json({"error": str(e)}, 500)
+
+    def send_to_session(self, session_id):
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(content_length))
+            message = body.get("message", "").strip()
+
+            if not message:
+                self.send_json({"ok": False, "error": "Empty message"}, 400)
+                return
+
+            db = get_db()
+            row = db.execute(
+                "SELECT tmux_pane FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            db.close()
+
+            if not row or not row["tmux_pane"]:
+                self.send_json({"ok": False, "error": "No tmux pane"}, 404)
+                return
+
+            pane = row["tmux_pane"]
+            # Send the message as keystrokes to the tmux pane
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane, message, "Enter"],
+                timeout=5,
+            )
+            self.send_json({"ok": True})
         except Exception as e:
             self.send_json({"ok": False, "error": str(e)}, 500)
 

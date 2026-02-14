@@ -35,19 +35,14 @@
     align-items: center;
     border-bottom: 1px solid var(--border);
   }
-  .header h1 {
-    font-size: 1.25rem;
-    font-weight: 600;
-  }
+  .header h1 { font-size: 1.25rem; font-weight: 600; }
   .header-stats {
     display: flex;
     gap: 1rem;
     font-size: 0.85rem;
     color: var(--text-dim);
   }
-  .header-stats .count {
-    font-weight: 600;
-  }
+  .header-stats .count { font-weight: 600; }
   .stat-active .count { color: var(--green); }
   .stat-idle .count { color: var(--yellow); }
   .stat-waiting .count { color: var(--orange); }
@@ -78,6 +73,7 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
     gap: 1rem;
+    padding-bottom: 4rem;
   }
 
   /* Card */
@@ -101,10 +97,7 @@
     align-items: flex-start;
     margin-bottom: 0.75rem;
   }
-  .card-project {
-    font-size: 1rem;
-    font-weight: 600;
-  }
+  .card-project { font-size: 1rem; font-weight: 600; }
   .card-status {
     display: flex;
     align-items: center;
@@ -112,21 +105,13 @@
     font-size: 0.8rem;
     font-weight: 500;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    display: inline-block;
-  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
   .dot-active { background: var(--green); box-shadow: 0 0 6px var(--green); }
   .dot-idle { background: var(--yellow); }
   .dot-waiting { background: var(--orange); animation: pulse 2s infinite; }
   .dot-ended { background: var(--text-dim); }
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
-  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
   .card-activity {
     font-size: 0.85rem;
@@ -142,7 +127,6 @@
     font-size: 0.82em;
     font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
   }
-
   .card-prompt {
     font-size: 0.82rem;
     color: var(--text-dim);
@@ -152,7 +136,6 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
-
   .card-meta {
     display: flex;
     justify-content: space-between;
@@ -160,12 +143,7 @@
     font-size: 0.78rem;
     color: var(--text-dim);
   }
-  .card-stats {
-    display: flex;
-    gap: 0.75rem;
-  }
-  .card-time { }
-
+  .card-stats { display: flex; gap: 0.75rem; }
   .card-actions {
     display: flex;
     gap: 0.5rem;
@@ -187,63 +165,165 @@
   .btn-jump:hover { border-color: var(--green); color: var(--green); }
   .btn-dismiss:hover { border-color: var(--red); color: var(--red); }
 
-  /* Detail modal */
+  /* Chat modal */
   .modal-overlay {
     display: none;
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0,0,0,0.7);
     z-index: 100;
     justify-content: center;
     align-items: center;
   }
   .modal-overlay.visible { display: flex; }
   .modal {
-    background: var(--surface);
+    background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 12px;
     width: 90%;
-    max-width: 600px;
-    max-height: 80vh;
-    overflow-y: auto;
-    padding: 1.5rem 2rem;
+    max-width: 750px;
+    height: 85vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
   }
-  .modal h2 {
-    font-size: 1.1rem;
-    margin-bottom: 0.5rem;
-  }
-  .modal-meta {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-    margin-bottom: 1rem;
-    padding-bottom: 1rem;
+  .modal-header {
+    padding: 1rem 1.5rem;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
   }
-  .modal-meta div { margin-bottom: 0.25rem; }
-  .modal-events h3 {
-    font-size: 0.9rem;
-    margin-bottom: 0.5rem;
+  .modal-header h2 { font-size: 1rem; }
+  .modal-header-info {
+    font-size: 0.78rem;
+    color: var(--text-dim);
   }
-  .event-row {
-    display: grid;
-    grid-template-columns: 70px 80px 1fr;
-    gap: 0.5rem;
-    font-size: 0.82rem;
-    padding: 0.3rem 0;
-    border-bottom: 1px solid rgba(48,54,61,0.5);
-  }
-  .event-time { color: var(--text-dim); font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; }
-  .event-tool { color: var(--purple); }
-  .event-detail { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .modal-close {
-    position: absolute;
-    top: 1rem;
-    right: 1rem;
     background: none;
     border: none;
     color: var(--text-dim);
-    font-size: 1.2rem;
+    font-size: 1.4rem;
     cursor: pointer;
+    padding: 0.25rem;
+    line-height: 1;
+  }
+  .modal-close:hover { color: var(--text); }
+
+  /* Chat messages */
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem 1.5rem;
+  }
+  .chat-msg {
+    margin-bottom: 1rem;
+    max-width: 90%;
+  }
+  .chat-msg.user {
+    margin-left: auto;
+  }
+  .chat-msg.assistant {
+    margin-right: auto;
+  }
+  .chat-msg-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+    font-weight: 600;
+  }
+  .chat-msg.user .chat-msg-label { color: var(--blue); text-align: right; }
+  .chat-msg.assistant .chat-msg-label { color: var(--purple); }
+  .chat-msg-body {
+    padding: 0.75rem 1rem;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .chat-msg.user .chat-msg-body {
+    background: rgba(88,166,255,0.1);
+    border: 1px solid rgba(88,166,255,0.2);
+    border-top-right-radius: 2px;
+  }
+  .chat-msg.assistant .chat-msg-body {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top-left-radius: 2px;
+  }
+  .chat-msg-body .tool-tag {
+    display: inline-block;
+    background: rgba(188,140,255,0.15);
+    color: var(--purple);
+    border: 1px solid rgba(188,140,255,0.2);
+    border-radius: 4px;
+    padding: 0.1rem 0.5rem;
+    font-size: 0.75rem;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    margin: 0.15rem 0.15rem 0.15rem 0;
+  }
+
+  /* Chat input */
+  .chat-input-area {
+    padding: 0.75rem 1.5rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-radius: 0 0 12px 12px;
+  }
+  .chat-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 0.6rem 1rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    outline: none;
+    resize: none;
+    min-height: 40px;
+    max-height: 120px;
+  }
+  .chat-input:focus { border-color: var(--blue); }
+  .chat-input::placeholder { color: var(--text-dim); }
+  .chat-send {
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    padding: 0.6rem 1.2rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-end;
+    transition: opacity 0.15s;
+  }
+  .chat-send:hover { opacity: 0.85; }
+  .chat-send:disabled { opacity: 0.4; cursor: default; }
+  .chat-send-hint {
+    align-self: center;
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+
+  .chat-empty {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 3rem;
+    font-size: 0.9rem;
+  }
+
+  .chat-loading {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 2rem;
   }
 
   /* Empty state */
@@ -299,9 +379,22 @@
 <div class="sessions" id="sessions"></div>
 
 <div class="modal-overlay" id="modal-overlay">
-  <div class="modal" id="modal" style="position:relative;">
-    <button class="modal-close" id="modal-close">&times;</button>
-    <div id="modal-content"></div>
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div>
+        <h2 id="modal-title"></h2>
+        <div class="modal-header-info" id="modal-info"></div>
+      </div>
+      <button class="modal-close" id="modal-close">&times;</button>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-loading">Loading conversation...</div>
+    </div>
+    <div class="chat-input-area" id="chat-input-area">
+      <textarea class="chat-input" id="chat-input" placeholder="Send a message to this session..." rows="1"></textarea>
+      <span class="chat-send-hint">via tmux</span>
+      <button class="chat-send" id="chat-send">Send</button>
+    </div>
   </div>
 </div>
 
@@ -311,8 +404,7 @@
 const state = {
   sessions: [],
   filter: 'all',
-  modalSession: null,
-  modalEvents: [],
+  modalSessionId: null,
 };
 
 // --- API ---
@@ -324,9 +416,9 @@ async function fetchSessions() {
   } catch { return []; }
 }
 
-async function fetchEvents(sessionId) {
+async function fetchTranscript(sessionId) {
   try {
-    const res = await fetch(`/api/events/${encodeURIComponent(sessionId)}`);
+    const res = await fetch(`/api/transcript/${encodeURIComponent(sessionId)}`);
     if (!res.ok) return [];
     return res.json();
   } catch { return []; }
@@ -343,6 +435,17 @@ async function dismiss(sessionId) {
     await fetch(`/api/dismiss/${encodeURIComponent(sessionId)}`, { method: 'POST' });
     refresh();
   } catch {}
+}
+
+async function sendMessage(sessionId, message) {
+  try {
+    const res = await fetch(`/api/send/${encodeURIComponent(sessionId)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    return res.json();
+  } catch { return { ok: false }; }
 }
 
 // --- Formatting ---
@@ -391,12 +494,9 @@ function formatActivity(s) {
   if (!detail) return label;
 
   let d = detail;
-  if ('Edit Write Read'.includes(tool) && d.includes('/')) {
-    d = d.split('/').pop();
-  }
-  if (d.length > 60) d = d.slice(0, 60) + '…';
+  if ('Edit Write Read'.includes(tool) && d.includes('/')) d = d.split('/').pop();
+  if (d.length > 60) d = d.slice(0, 60) + '\u2026';
 
-  if (tool === 'Bash') return `${label} <code>${esc(d)}</code>`;
   return `${label} <code>${esc(d)}</code>`;
 }
 
@@ -430,7 +530,7 @@ function renderSessions(sessions) {
       <div class="empty" style="grid-column: 1 / -1;">
         <h2>${state.filter === 'all' ? 'No sessions yet' : `No ${state.filter} sessions`}</h2>
         <p>${state.filter === 'all' ? 'Start a Claude Code session and it will appear here automatically.' : 'Try a different filter.'}</p>
-        ${state.filter === 'all' ? '<code>python3 setup.py</code>' : ''}
+        ${state.filter === 'all' ? '<code>claude-track setup</code>' : ''}
       </div>`;
     return;
   }
@@ -458,58 +558,122 @@ function renderSessions(sessions) {
       </div>
       <div class="card-actions">
         ${hasPane ? `<button class="btn btn-jump" onclick="event.stopPropagation(); jumpTo('${esc(s.session_id)}')">Jump to pane</button>` : ''}
-        <button class="btn" onclick="event.stopPropagation(); showDetail('${esc(s.session_id)}')">Details</button>
+        <button class="btn" onclick="event.stopPropagation(); showChat('${esc(s.session_id)}')">Conversation</button>
         ${s.status === 'ended' ? `<button class="btn btn-dismiss" onclick="event.stopPropagation(); dismiss('${esc(s.session_id)}')">Dismiss</button>` : ''}
       </div>
     </div>`;
   }).join('');
 
-  // Click card to show detail
   container.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('click', () => showDetail(card.dataset.id));
+    card.addEventListener('click', () => showChat(card.dataset.id));
   });
 }
 
-async function showDetail(sessionId) {
-  const overlay = document.getElementById('modal-overlay');
-  const content = document.getElementById('modal-content');
+function renderChat(messages) {
+  const container = document.getElementById('chat-messages');
 
+  if (messages.length === 0) {
+    container.innerHTML = '<div class="chat-empty">No conversation yet.</div>';
+    return;
+  }
+
+  container.innerHTML = messages.map(m => {
+    const role = m.role;
+    let body = esc(m.content);
+    // Highlight [Tool: xyz] tags
+    body = body.replace(/\[Tool: ([^\]]+)\]/g, '<span class="tool-tag">$1</span>');
+    return `
+      <div class="chat-msg ${role}">
+        <div class="chat-msg-label">${role}</div>
+        <div class="chat-msg-body">${body}</div>
+      </div>`;
+  }).join('');
+
+  // Scroll to bottom
+  container.scrollTop = container.scrollHeight;
+}
+
+async function showChat(sessionId) {
+  state.modalSessionId = sessionId;
   const session = state.sessions.find(s => s.session_id === sessionId);
   if (!session) return;
 
-  const events = await fetchEvents(sessionId);
+  document.getElementById('modal-title').textContent = projectName(session.project_dir);
+  const infoParts = [shortProject(session.project_dir)];
+  if (session.model) infoParts.push(session.model);
+  if (session.tmux_window) infoParts.push(`tmux: ${session.tmux_window}`);
+  document.getElementById('modal-info').textContent = infoParts.join(' \u00b7 ');
 
-  let html = `
-    <h2>${esc(projectName(session.project_dir))}</h2>
-    <div class="modal-meta">
-      <div><strong>Path:</strong> ${esc(shortProject(session.project_dir))}</div>
-      <div><strong>Session:</strong> ${esc(sessionId.slice(0, 16))}…</div>
-      ${session.model ? `<div><strong>Model:</strong> ${esc(session.model)}</div>` : ''}
-      ${session.tmux_window ? `<div><strong>Tmux:</strong> ${esc(session.tmux_window)} (${esc(session.tmux_pane)})</div>` : ''}
-      <div><strong>Started:</strong> ${session.started_at ? new Date(session.started_at).toLocaleString() : '?'}</div>
-      ${session.last_prompt ? `<div><strong>Current task:</strong> "${esc(session.last_prompt.slice(0, 150))}"</div>` : ''}
-    </div>
-    <div class="modal-events">
-      <h3>Recent Activity</h3>
-      ${events.length === 0 ? '<p style="color:var(--text-dim);font-size:0.85rem;">No events recorded yet.</p>' : ''}
-      ${events.map(ev => {
-        let ts = '';
-        if (ev.timestamp) {
-          try { ts = new Date(ev.timestamp).toLocaleTimeString(); } catch {}
-        }
-        const detail = ev.detail ? (ev.detail.length > 80 ? ev.detail.slice(0, 80) + '…' : ev.detail) : '';
-        return `
-          <div class="event-row">
-            <span class="event-time">${esc(ts)}</span>
-            <span class="event-tool">${esc(ev.tool_name || ev.event_type)}</span>
-            <span class="event-detail">${esc(detail)}</span>
-          </div>`;
-      }).join('')}
-    </div>`;
+  // Show/hide input based on whether we have a tmux pane
+  const inputArea = document.getElementById('chat-input-area');
+  inputArea.style.display = session.tmux_pane ? 'flex' : 'none';
 
-  content.innerHTML = html;
-  overlay.classList.add('visible');
+  document.getElementById('chat-messages').innerHTML = '<div class="chat-loading">Loading conversation...</div>';
+  document.getElementById('modal-overlay').classList.add('visible');
+
+  const messages = await fetchTranscript(sessionId);
+  renderChat(messages);
+
+  // Focus input
+  if (session.tmux_pane) {
+    document.getElementById('chat-input').focus();
+  }
 }
+
+// --- Chat input ---
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+
+chatInput.addEventListener('input', () => {
+  chatInput.style.height = 'auto';
+  chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+});
+
+chatInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    doSend();
+  }
+});
+
+chatSend.addEventListener('click', doSend);
+
+async function doSend() {
+  const msg = chatInput.value.trim();
+  if (!msg || !state.modalSessionId) return;
+
+  chatSend.disabled = true;
+  chatInput.value = '';
+  chatInput.style.height = 'auto';
+
+  // Optimistically add to chat
+  const container = document.getElementById('chat-messages');
+  const msgEl = document.createElement('div');
+  msgEl.className = 'chat-msg user';
+  msgEl.innerHTML = `
+    <div class="chat-msg-label">you (via tmux)</div>
+    <div class="chat-msg-body">${esc(msg)}</div>`;
+  container.appendChild(msgEl);
+  container.scrollTop = container.scrollHeight;
+
+  await sendMessage(state.modalSessionId, msg);
+  chatSend.disabled = false;
+  chatInput.focus();
+
+  // Refresh transcript after a delay to pick up the response
+  setTimeout(async () => {
+    const messages = await fetchTranscript(state.modalSessionId);
+    renderChat(messages);
+  }, 3000);
+}
+
+// Auto-refresh transcript if modal is open
+setInterval(async () => {
+  if (state.modalSessionId && document.getElementById('modal-overlay').classList.contains('visible')) {
+    const messages = await fetchTranscript(state.modalSessionId);
+    renderChat(messages);
+  }
+}, 5000);
 
 // --- Event handlers ---
 document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -524,14 +688,17 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
 document.getElementById('modal-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) {
     e.currentTarget.classList.remove('visible');
+    state.modalSessionId = null;
   }
 });
 document.getElementById('modal-close').addEventListener('click', () => {
   document.getElementById('modal-overlay').classList.remove('visible');
+  state.modalSessionId = null;
 });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     document.getElementById('modal-overlay').classList.remove('visible');
+    state.modalSessionId = null;
   }
 });
 
