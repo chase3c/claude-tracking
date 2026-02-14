@@ -2,6 +2,7 @@
 
 Run in a tmux pane to monitor all your Claude Code sessions.
 """
+import json
 import os
 import sqlite3
 import subprocess
@@ -142,6 +143,40 @@ def fetch_events(session_id):
         return []
 
 
+def read_transcript(path, max_messages=3):
+    """Read recent assistant text output from a transcript JSONL file."""
+    if not path or not os.path.exists(path):
+        return []
+    messages = []
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                role = entry.get("role", "")
+                if role != "assistant":
+                    continue
+                content = entry.get("content", "")
+                if isinstance(content, list):
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text_parts.append(block.get("text", ""))
+                        elif isinstance(block, str):
+                            text_parts.append(block)
+                    content = "\n".join(text_parts)
+                if content and content.strip():
+                    messages.append(content.strip())
+    except Exception:
+        return []
+    return messages[-max_messages:]
+
+
 class DetailPanel(Static):
     pass
 
@@ -175,6 +210,8 @@ class SessionTracker(App):
     TITLE = "Claude Sessions"
     BINDINGS = [
         Binding("q", "quit", "Quit"),
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
         Binding("enter", "jump", "Jump to pane"),
         Binding("space", "toggle_detail", "Details"),
         Binding("d", "dismiss", "Dismiss"),
@@ -292,6 +329,19 @@ class SessionTracker(App):
             lines.append(f'[dim]Task:[/] "{prompt}"')
         lines.append("")
 
+        # Show recent Claude output from transcript
+        transcript = session.get("transcript_path", "")
+        recent_output = read_transcript(transcript, max_messages=2)
+        if recent_output:
+            lines.append("[bold]Recent output[/]")
+            for msg in recent_output:
+                # Truncate long messages and indent
+                preview = msg.replace("\n", " ")
+                if len(preview) > 200:
+                    preview = preview[:200] + "\u2026"
+                lines.append(f"  [white]{preview}[/]")
+            lines.append("")
+
         if events:
             lines.append("[bold]Recent activity[/]")
             for ev in events[:10]:
@@ -314,6 +364,14 @@ class SessionTracker(App):
                     lines.append(f"  [dim]{ts}[/]  {etype}")
 
         detail.update("\n".join(lines))
+
+    def action_cursor_down(self):
+        table = self.query_one("#sessions-table", DataTable)
+        table.action_cursor_down()
+
+    def action_cursor_up(self):
+        table = self.query_one("#sessions-table", DataTable)
+        table.action_cursor_up()
 
     def action_jump(self):
         sid = self._get_selected_session_id()

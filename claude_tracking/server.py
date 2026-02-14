@@ -150,7 +150,8 @@ def ensure_db():
             last_prompt TEXT,
             prompt_count INTEGER DEFAULT 0,
             tool_count INTEGER DEFAULT 0,
-            model TEXT
+            model TEXT,
+            transcript_path TEXT
         )
     """)
     db.execute("""

@@ -32,7 +32,8 @@ def init_db(db):
             last_prompt TEXT,
             prompt_count INTEGER DEFAULT 0,
             tool_count INTEGER DEFAULT 0,
-            model TEXT
+            model TEXT,
+            transcript_path TEXT
         )
     """)
     db.execute("""
@@ -45,6 +46,12 @@ def init_db(db):
             detail TEXT
         )
     """)
+    # Migrate: add transcript_path if missing
+    try:
+        db.execute("ALTER TABLE sessions ADD COLUMN transcript_path TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     db.commit()
 
 
@@ -107,6 +114,7 @@ def track(data):
     tool_name = data.get("tool_name", "")
     tool_input = data.get("tool_input", {})
     model = data.get("model", "")
+    transcript_path = data.get("transcript_path", "")
 
     pane, window, tmux_session = get_tmux_info()
     detail = extract_detail(event_name, tool_name, tool_input)
@@ -139,6 +147,9 @@ def track(data):
         if cwd:
             updates.append("project_dir = ?")
             params.append(cwd)
+        if transcript_path:
+            updates.append("transcript_path = ?")
+            params.append(transcript_path)
 
         if event_name == "UserPromptSubmit":
             prompt_text = data.get("prompt", "")[:200]
@@ -169,15 +180,16 @@ def track(data):
             """INSERT INTO sessions
                (session_id, project_dir, tmux_pane, tmux_window, tmux_session,
                 status, started_at, last_activity, last_event, last_tool,
-                last_detail, last_prompt, prompt_count, tool_count, model)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                last_detail, last_prompt, prompt_count, tool_count, model,
+                transcript_path)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, cwd, pane, window, tmux_session,
                 status, now, now, event_name, tool_name,
                 detail, prompt_text,
                 1 if event_name == "UserPromptSubmit" else 0,
                 1 if tool_name else 0,
-                model,
+                model, transcript_path,
             ),
         )
 

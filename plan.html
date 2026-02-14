@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Session Tracker — Plan</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-hover: #1c2129;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-secondary: #8b949e;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --orange: #db6d28;
+    --red: #f85149;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  header {
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  header h1 {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    max-width: 700px;
+  }
+
+  .goal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 2.5rem;
+  }
+
+  .goal h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+  }
+
+  .goal ul {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .goal li {
+    background: rgba(88, 166, 255, 0.1);
+    color: var(--blue);
+    border: 1px solid rgba(88, 166, 255, 0.2);
+    border-radius: 20px;
+    padding: 0.3rem 0.85rem;
+    font-size: 0.85rem;
+  }
+
+  .recommended {
+    display: inline-block;
+    background: rgba(63, 185, 80, 0.15);
+    color: var(--green);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15rem 0.6rem;
+    border-radius: 20px;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+
+  .option {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.75rem;
+    margin-bottom: 1.5rem;
+    transition: border-color 0.2s;
+  }
+
+  .option:hover {
+    border-color: var(--text-secondary);
+  }
+
+  .option.recommended-option {
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px rgba(63, 185, 80, 0.15);
+  }
+
+  .option h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .option-num {
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+
+  .architecture {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .architecture strong {
+    color: var(--text);
+  }
+
+  .tech-stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .tech-tag {
+    background: rgba(188, 140, 255, 0.1);
+    color: var(--purple);
+    border: 1px solid rgba(188, 140, 255, 0.2);
+    border-radius: 4px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.8rem;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  }
+
+  .preview {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .pros-cons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  @media (max-width: 600px) {
+    .pros-cons { grid-template-columns: 1fr; }
+  }
+
+  .pros h4, .cons h4 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+  }
+
+  .pros h4 { color: var(--green); }
+  .cons h4 { color: var(--orange); }
+
+  .pros ul, .cons ul {
+    list-style: none;
+    font-size: 0.9rem;
+  }
+
+  .pros li, .cons li {
+    padding: 0.25rem 0;
+    padding-left: 1.2rem;
+    position: relative;
+    color: var(--text-secondary);
+  }
+
+  .pros li::before {
+    content: "+";
+    position: absolute;
+    left: 0;
+    color: var(--green);
+    font-weight: 700;
+  }
+
+  .cons li::before {
+    content: "−";
+    position: absolute;
+    left: 0.1rem;
+    color: var(--orange);
+    font-weight: 700;
+  }
+
+  .shared-section {
+    margin-top: 2.5rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .shared-section h2 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+
+  .shared-section h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    margin-top: 1.5rem;
+  }
+
+  .shared-section p, .shared-section li {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  .shared-section ul {
+    list-style: none;
+    margin-left: 0;
+  }
+
+  .shared-section ul li {
+    padding: 0.2rem 0;
+    padding-left: 1.2rem;
+    position: relative;
+  }
+
+  .shared-section ul li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: var(--blue);
+  }
+
+  code, .code-block {
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  }
+
+  .code-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--text-secondary);
+  }
+
+  .code-block .key { color: var(--blue); }
+  .code-block .str { color: var(--green); }
+  .code-block .comment { color: var(--text-secondary); font-style: italic; }
+
+  code {
+    background: rgba(88, 166, 255, 0.1);
+    color: var(--blue);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  .diagram {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .flow-green { color: var(--green); }
+  .flow-blue { color: var(--blue); }
+  .flow-yellow { color: var(--yellow); }
+  .flow-purple { color: var(--purple); }
+  .flow-dim { color: var(--text-secondary); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Claude Code Session Tracker</h1>
+  <p>A tool to monitor all running Claude Code sessions from one place.
+     See status, summaries, and jump to any session in tmux.</p>
+</header>
+
+<div class="goal">
+  <h2>Requirements</h2>
+  <ul>
+    <li>See all sessions in one pane</li>
+    <li>Summary of each session</li>
+    <li>Session status (active / idle / waiting)</li>
+    <li>Jump to tmux pane</li>
+    <li>Single-user, local only</li>
+  </ul>
+</div>
+
+<!-- Option 1 -->
+<div class="option recommended-option">
+  <h3><span class="option-num">Option 1 —</span> Hooks + SQLite + Terminal UI <span class="recommended">Recommended</span></h3>
+
+  <div class="architecture">
+    Claude Code <strong>hooks</strong> fire on session events and write to a shared <strong>SQLite</strong> database.
+    A <strong>TUI app</strong> (running in its own tmux pane) reads from SQLite and renders a live dashboard.
+    Jump-to-session is native since you're already in tmux.
+  </div>
+
+  <div class="tech-stack">
+    <span class="tech-tag">Python / Textual</span>
+    <span class="tech-tag">or Go / Bubble Tea</span>
+    <span class="tech-tag">SQLite</span>
+    <span class="tech-tag">Claude Hooks</span>
+  </div>
+
+  <div class="diagram"><span class="flow-dim">┌──────────────┐     ┌──────────────┐     ┌──────────────┐</span>
+<span class="flow-dim">│</span> <span class="flow-green">Claude Sess 1</span> <span class="flow-dim">│     │</span> <span class="flow-green">Claude Sess 2</span> <span class="flow-dim">│     │</span> <span class="flow-green">Claude Sess 3</span> <span class="flow-dim">│</span>
+<span class="flow-dim">└──────┬───────┘     └──────┬───────┘     └──────┬───────┘</span>
+       <span class="flow-dim">│ hooks              │ hooks              │ hooks</span>
+       <span class="flow-dim">▼                    ▼                    ▼</span>
+<span class="flow-dim">┌─────────────────────────────────────────────────────────┐</span>
+<span class="flow-dim">│</span>             <span class="flow-blue">track.py → SQLite (~/.claude/tracking.db)</span>        <span class="flow-dim">│</span>
+<span class="flow-dim">└──────────────────────────┬──────────────────────────────┘</span>
+                           <span class="flow-dim">│ reads</span>
+                           <span class="flow-dim">▼</span>
+              <span class="flow-dim">┌──────────────────────────┐</span>
+              <span class="flow-dim">│</span>  <span class="flow-yellow">TUI Dashboard (tmux pane)</span> <span class="flow-dim">│</span>
+              <span class="flow-dim">│</span>  <span class="flow-purple">tmux select-pane → jump</span>  <span class="flow-dim">│</span>
+              <span class="flow-dim">└──────────────────────────┘</span></div>
+
+  <div class="preview">┌─ Claude Sessions ─────────────────────────────────────────────┐
+│ Session     │ Project        │ Status     │ Last Activity      │
+│─────────────┼────────────────┼────────────┼────────────────────│
+│ abc123      │ ~/code/myapp   │ ● Active   │ Editing app.py     │
+│ def456      │ ~/code/api     │ ● Idle     │ Ran tests (2m ago) │
+│ ghi789      │ ~/code/infra   │ ● Waiting  │ Needs permission   │
+│                                                                │
+│  [Enter] Jump to pane    [d] Details    [x] Dismiss    [q] Quit│
+└────────────────────────────────────────────────────────────────┘</div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Pros</h4>
+      <ul>
+        <li>Lives in tmux — no context switch</li>
+        <li>Native jump-to-pane (instant)</li>
+        <li>No browser, no extra processes</li>
+        <li>SQLite handles concurrent writes safely</li>
+        <li>Textual makes polished TUIs quickly</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cons</h4>
+      <ul>
+        <li>Textual / Bubble Tea is a library to learn</li>
+        <li>Harder to do rich visuals (charts, etc.)</li>
+        <li>Resizing can be finicky in tmux</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Option 2 -->
+<div class="option">
+  <h3><span class="option-num">Option 2 —</span> Hooks + SQLite + Local Web Dashboard</h3>
+
+  <div class="architecture">
+    Same hook-based data collection into <strong>SQLite</strong>.
+    A small <strong>Python HTTP server</strong> serves an HTML dashboard on <code>localhost</code>
+    with auto-refreshing via polling. Tmux jumping works through a server-side API endpoint
+    that calls <code>tmux select-pane</code>.
+  </div>
+
+  <div class="tech-stack">
+    <span class="tech-tag">Python http.server</span>
+    <span class="tech-tag">SQLite</span>
+    <span class="tech-tag">HTML / CSS / JS</span>
+    <span class="tech-tag">Claude Hooks</span>
+  </div>
+
+  <div class="diagram"><span class="flow-dim">┌──────────────┐     ┌──────────────┐     ┌──────────────┐</span>
+<span class="flow-dim">│</span> <span class="flow-green">Claude Sess 1</span> <span class="flow-dim">│     │</span> <span class="flow-green">Claude Sess 2</span> <span class="flow-dim">│     │</span> <span class="flow-green">Claude Sess 3</span> <span class="flow-dim">│</span>
+<span class="flow-dim">└──────┬───────┘     └──────┬───────┘     └──────┬───────┘</span>
+       <span class="flow-dim">│ hooks              │ hooks              │ hooks</span>
+       <span class="flow-dim">▼                    ▼                    ▼</span>
+<span class="flow-dim">┌─────────────────────────────────────────────────────────┐</span>
+<span class="flow-dim">│</span>             <span class="flow-blue">track.py → SQLite (~/.claude/tracking.db)</span>        <span class="flow-dim">│</span>
+<span class="flow-dim">└──────────────────────────┬──────────────────────────────┘</span>
+                           <span class="flow-dim">│ reads</span>
+                           <span class="flow-dim">▼</span>
+              <span class="flow-dim">┌──────────────────────────┐</span>
+              <span class="flow-dim">│</span>  <span class="flow-yellow">Python HTTP server</span>        <span class="flow-dim">│</span>
+              <span class="flow-dim">│</span>  <span class="flow-purple">localhost:7860</span>             <span class="flow-dim">│</span>
+              <span class="flow-dim">└─────────────┬────────────┘</span>
+                            <span class="flow-dim">│ serves</span>
+                            <span class="flow-dim">▼</span>
+              <span class="flow-dim">┌──────────────────────────┐</span>
+              <span class="flow-dim">│</span>  <span class="flow-yellow">Browser dashboard</span>        <span class="flow-dim">│</span>
+              <span class="flow-dim">│</span>  <span class="flow-purple">POST /api/jump → tmux</span>    <span class="flow-dim">│</span>
+              <span class="flow-dim">└──────────────────────────┘</span></div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Pros</h4>
+      <ul>
+        <li>Richer UI (charts, search, expandable details)</li>
+        <li>Easy to iterate on visually</li>
+        <li>Stdlib only — no pip dependencies</li>
+        <li>Could add WebSocket for real-time push later</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cons</h4>
+      <ul>
+        <li>Extra process to keep running (the server)</li>
+        <li>Browser tab to manage</li>
+        <li>Tmux jump is indirect (API → shell → tmux)</li>
+        <li>Context switch: terminal ↔ browser</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Option 3 -->
+<div class="option">
+  <h3><span class="option-num">Option 3 —</span> Lightweight: Hooks + tmux Status Pane</h3>
+
+  <div class="architecture">
+    Hooks write session state to simple <strong>JSON files</strong> under <code>~/.claude/tracking/</code>.
+    A small <strong>shell or Python script</strong> runs in a dedicated tmux pane,
+    polling those files and rendering a compact table. Minimal moving parts.
+  </div>
+
+  <div class="tech-stack">
+    <span class="tech-tag">Bash / Python</span>
+    <span class="tech-tag">JSON files</span>
+    <span class="tech-tag">Claude Hooks</span>
+    <span class="tech-tag">watch / rich</span>
+  </div>
+
+  <div class="diagram"><span class="flow-dim">┌──────────────┐     ┌──────────────┐     ┌──────────────┐</span>
+<span class="flow-dim">│</span> <span class="flow-green">Claude Sess 1</span> <span class="flow-dim">│     │</span> <span class="flow-green">Claude Sess 2</span> <span class="flow-dim">│     │</span> <span class="flow-green">Claude Sess 3</span> <span class="flow-dim">│</span>
+<span class="flow-dim">└──────┬───────┘     └──────┬───────┘     └──────┬───────┘</span>
+       <span class="flow-dim">│ hooks              │ hooks              │ hooks</span>
+       <span class="flow-dim">▼                    ▼                    ▼</span>
+<span class="flow-dim">┌─────────────────────────────────────────────────────────┐</span>
+<span class="flow-dim">│</span>     <span class="flow-blue">track.sh → JSON files (~/.claude/tracking/*.json)</span>     <span class="flow-dim">│</span>
+<span class="flow-dim">└──────────────────────────┬──────────────────────────────┘</span>
+                           <span class="flow-dim">│ polls</span>
+                           <span class="flow-dim">▼</span>
+              <span class="flow-dim">┌──────────────────────────┐</span>
+              <span class="flow-dim">│</span>  <span class="flow-yellow">watch + render script</span>    <span class="flow-dim">│</span>
+              <span class="flow-dim">│</span>  <span class="flow-purple">(runs in tmux pane)</span>       <span class="flow-dim">│</span>
+              <span class="flow-dim">└──────────────────────────┘</span></div>
+
+  <div class="pros-cons">
+    <div class="pros">
+      <h4>Pros</h4>
+      <ul>
+        <li>Simplest to build (could be ~100 lines total)</li>
+        <li>Zero dependencies beyond Python stdlib</li>
+        <li>Fits naturally in tmux workflow</li>
+        <li>Easy to understand and modify</li>
+      </ul>
+    </div>
+    <div class="cons">
+      <h4>Cons</h4>
+      <ul>
+        <li>Limited interactivity (no click, no expand)</li>
+        <li>Harder to show detailed summaries</li>
+        <li>JSON files can have race conditions under heavy writes</li>
+        <li>Basically a <code>watch</code> loop</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Shared Architecture -->
+<div class="shared-section">
+  <h2>Shared: Hook Data Collection</h2>
+  <p>All three options use the same hooks layer. Here's what gets captured:</p>
+
+  <h3>Hook Events</h3>
+  <ul>
+    <li><code>SessionStart</code> — session created, capture tmux pane ID via <code>$TMUX_PANE</code></li>
+    <li><code>UserPromptSubmit</code> — user sent a prompt (includes prompt text for summary)</li>
+    <li><code>PostToolUse</code> — tool finished (async; captures tool name + file/command detail)</li>
+    <li><code>Stop</code> — Claude finished responding, now idle waiting for input</li>
+    <li><code>PermissionRequest</code> — session blocked, waiting for user to approve a tool</li>
+    <li><code>SessionEnd</code> — session terminated</li>
+  </ul>
+
+  <h3>Data Available Per Event</h3>
+  <ul>
+    <li><code>session_id</code> — unique session identifier</li>
+    <li><code>cwd</code> — working directory (i.e. project path)</li>
+    <li><code>hook_event_name</code> — which event fired</li>
+    <li><code>transcript_path</code> — path to full session transcript</li>
+    <li><code>tool_name</code> — Edit, Bash, Read, Grep, etc. (tool events only)</li>
+    <li><code>tool_input</code> — file path, command, pattern, etc. (tool events only)</li>
+    <li><code>prompt</code> — user's prompt text (UserPromptSubmit only)</li>
+    <li><code>$TMUX_PANE</code> — env var with the tmux pane ID (e.g. <code>%5</code>)</li>
+  </ul>
+
+  <h3>Session Statuses</h3>
+  <ul>
+    <li><span style="color: var(--green);">● Active</span> — Claude is working (tool calls, responding)</li>
+    <li><span style="color: var(--yellow);">● Idle</span> — waiting for user input</li>
+    <li><span style="color: var(--orange);">● Waiting</span> — blocked on permission approval</li>
+    <li><span style="color: var(--text-secondary);">● Ended</span> — session terminated</li>
+  </ul>
+
+  <h3>Example Hook Config</h3>
+  <div class="code-block"><span class="comment">// In ~/.claude/settings.json</span>
+{
+  <span class="key">"hooks"</span>: {
+    <span class="key">"SessionStart"</span>:      [{ <span class="key">"hooks"</span>: [{ <span class="key">"type"</span>: <span class="str">"command"</span>, <span class="key">"command"</span>: <span class="str">"python3 ~/track.py"</span> }] }],
+    <span class="key">"UserPromptSubmit"</span>:  [{ <span class="key">"hooks"</span>: [{ <span class="key">"type"</span>: <span class="str">"command"</span>, <span class="key">"command"</span>: <span class="str">"python3 ~/track.py"</span> }] }],
+    <span class="key">"PostToolUse"</span>:       [{ <span class="key">"hooks"</span>: [{ <span class="key">"type"</span>: <span class="str">"command"</span>, <span class="key">"command"</span>: <span class="str">"python3 ~/track.py"</span>, <span class="key">"async"</span>: true }] }],
+    <span class="key">"Stop"</span>:              [{ <span class="key">"hooks"</span>: [{ <span class="key">"type"</span>: <span class="str">"command"</span>, <span class="key">"command"</span>: <span class="str">"python3 ~/track.py"</span> }] }],
+    <span class="key">"PermissionRequest"</span>: [{ <span class="key">"hooks"</span>: [{ <span class="key">"type"</span>: <span class="str">"command"</span>, <span class="key">"command"</span>: <span class="str">"python3 ~/track.py"</span> }] }],
+    <span class="key">"SessionEnd"</span>:        [{ <span class="key">"hooks"</span>: [{ <span class="key">"type"</span>: <span class="str">"command"</span>, <span class="key">"command"</span>: <span class="str">"python3 ~/track.py"</span> }] }]
+  }
+}</div>
+
+  <h3>Tmux Jump</h3>
+  <p>The hook captures <code>$TMUX_PANE</code> at session start. To jump to a session:</p>
+  <div class="code-block">tmux select-window -t <span class="str">%5</span>    <span class="comment"># switch to the window containing pane %5</span>
+tmux select-pane -t <span class="str">%5</span>      <span class="comment"># focus that specific pane</span></div>
+</div>
+
+<footer>
+  Generated for claude-tracking project &middot; Feb 2026
+</footer>
+
+</body>
+</html>
