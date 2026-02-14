@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Sessions</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-hover: #1c2129;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --red: #f85149;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  /* Header */
+  .header {
+    padding: 1.5rem 2rem 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+  }
+  .header h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+  .header-stats {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+  }
+  .header-stats .count {
+    font-weight: 600;
+  }
+  .stat-active .count { color: var(--green); }
+  .stat-idle .count { color: var(--yellow); }
+  .stat-waiting .count { color: var(--orange); }
+
+  /* Filters */
+  .filters {
+    padding: 0.75rem 2rem;
+    display: flex;
+    gap: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .filter-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 0.3rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-btn:hover { border-color: var(--text-dim); color: var(--text); }
+  .filter-btn.active { background: rgba(88,166,255,0.15); border-color: var(--blue); color: var(--blue); }
+
+  /* Grid */
+  .sessions {
+    padding: 1.5rem 2rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 1rem;
+  }
+
+  /* Card */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    transition: border-color 0.15s;
+    cursor: pointer;
+  }
+  .card:hover { border-color: var(--text-dim); }
+  .card.status-active { border-top: 2px solid var(--green); }
+  .card.status-idle { border-top: 2px solid var(--yellow); }
+  .card.status-waiting { border-top: 2px solid var(--orange); }
+  .card.status-ended { border-top: 2px solid var(--border); opacity: 0.7; }
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+  .card-project {
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .card-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot-active { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-idle { background: var(--yellow); }
+  .dot-waiting { background: var(--orange); animation: pulse 2s infinite; }
+  .dot-ended { background: var(--text-dim); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .card-activity {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+    min-height: 1.3rem;
+  }
+  .card-activity code {
+    color: var(--blue);
+    background: rgba(88,166,255,0.1);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.82em;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  }
+
+  .card-prompt {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+    font-style: italic;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .card-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .card-stats {
+    display: flex;
+    gap: 0.75rem;
+  }
+  .card-time { }
+
+  .card-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 0.3rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn:hover { border-color: var(--blue); color: var(--blue); }
+  .btn-jump:hover { border-color: var(--green); color: var(--green); }
+  .btn-dismiss:hover { border-color: var(--red); color: var(--red); }
+
+  /* Detail modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    justify-content: center;
+    align-items: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 1.5rem 2rem;
+  }
+  .modal h2 {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+  }
+  .modal-meta {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-meta div { margin-bottom: 0.25rem; }
+  .modal-events h3 {
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+  }
+  .event-row {
+    display: grid;
+    grid-template-columns: 70px 80px 1fr;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+  }
+  .event-time { color: var(--text-dim); font-family: 'SF Mono', SFMono-Regular, Consolas, monospace; }
+  .event-tool { color: var(--purple); }
+  .event-detail { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal-close {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 1.2rem;
+    cursor: pointer;
+  }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-dim);
+  }
+  .empty h2 { font-size: 1.2rem; color: var(--text); margin-bottom: 0.5rem; }
+  .empty p { max-width: 400px; margin: 0 auto; font-size: 0.9rem; }
+  .empty code {
+    display: inline-block;
+    margin-top: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.8rem;
+    border-radius: 6px;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 0.85rem;
+    color: var(--blue);
+  }
+
+  /* Footer */
+  .footer {
+    padding: 0.75rem 2rem;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Claude Sessions</h1>
+  <div class="header-stats" id="stats"></div>
+</div>
+
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">All</button>
+  <button class="filter-btn" data-filter="active">Active</button>
+  <button class="filter-btn" data-filter="idle">Idle</button>
+  <button class="filter-btn" data-filter="waiting">Waiting</button>
+  <button class="filter-btn" data-filter="ended">Ended</button>
+</div>
+
+<div class="sessions" id="sessions"></div>
+
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal" style="position:relative;">
+    <button class="modal-close" id="modal-close">&times;</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<div class="footer">Auto-refreshing every 3s</div>
+
+<script>
+const state = {
+  sessions: [],
+  filter: 'all',
+  modalSession: null,
+  modalEvents: [],
+};
+
+// --- API ---
+async function fetchSessions() {
+  try {
+    const res = await fetch('/api/sessions');
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
+
+async function fetchEvents(sessionId) {
+  try {
+    const res = await fetch(`/api/events/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) return [];
+    return res.json();
+  } catch { return []; }
+}
+
+async function jumpTo(sessionId) {
+  try {
+    await fetch(`/api/jump/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+  } catch {}
+}
+
+async function dismiss(sessionId) {
+  try {
+    await fetch(`/api/dismiss/${encodeURIComponent(sessionId)}`, { method: 'POST' });
+    refresh();
+  } catch {}
+}
+
+// --- Formatting ---
+function timeAgo(iso) {
+  if (!iso) return '';
+  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (secs < 0) return 'just now';
+  if (secs < 60) return 'just now';
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+function shortProject(path) {
+  if (!path) return 'Unknown';
+  const home = path.match(/^\/Users\/[^/]+/)?.[0] || '';
+  let short = home ? '~' + path.slice(home.length) : path;
+  const parts = short.split('/');
+  return parts.length > 3 ? parts.slice(-2).join('/') : short;
+}
+
+function projectName(path) {
+  if (!path) return 'Unknown';
+  return path.split('/').filter(Boolean).pop() || path;
+}
+
+function formatActivity(s) {
+  const ev = s.last_event;
+  const tool = s.last_tool;
+  const detail = s.last_detail || '';
+
+  if (ev === 'Stop') return 'Waiting for input';
+  if (ev === 'PermissionRequest') return 'Needs permission approval';
+  if (ev === 'UserPromptSubmit') {
+    if (detail) return `Prompt: "${detail.slice(0, 80)}"`;
+    return 'User prompted';
+  }
+  if (!tool) return '';
+
+  const labels = {
+    Edit: 'Editing', Write: 'Writing', Read: 'Reading',
+    Bash: 'Running', Grep: 'Searching', Glob: 'Finding',
+    Task: 'Task', WebSearch: 'Searching web', WebFetch: 'Fetching',
+  };
+  const label = labels[tool] || tool;
+  if (!detail) return label;
+
+  let d = detail;
+  if ('Edit Write Read'.includes(tool) && d.includes('/')) {
+    d = d.split('/').pop();
+  }
+  if (d.length > 60) d = d.slice(0, 60) + '…';
+
+  if (tool === 'Bash') return `${label} <code>${esc(d)}</code>`;
+  return `${label} <code>${esc(d)}</code>`;
+}
+
+function esc(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+// --- Rendering ---
+function renderStats(sessions) {
+  const counts = {};
+  sessions.forEach(s => { counts[s.status] = (counts[s.status] || 0) + 1; });
+  const el = document.getElementById('stats');
+  let html = '';
+  if (counts.active) html += `<span class="stat-active"><span class="count">${counts.active}</span> active</span>`;
+  if (counts.idle) html += `<span class="stat-idle"><span class="count">${counts.idle}</span> idle</span>`;
+  if (counts.waiting) html += `<span class="stat-waiting"><span class="count">${counts.waiting}</span> waiting</span>`;
+  if (counts.ended) html += `<span><span class="count">${counts.ended}</span> ended</span>`;
+  el.innerHTML = html || '<span>No sessions</span>';
+}
+
+function renderSessions(sessions) {
+  const container = document.getElementById('sessions');
+  const filtered = state.filter === 'all'
+    ? sessions
+    : sessions.filter(s => s.status === state.filter);
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="empty" style="grid-column: 1 / -1;">
+        <h2>${state.filter === 'all' ? 'No sessions yet' : `No ${state.filter} sessions`}</h2>
+        <p>${state.filter === 'all' ? 'Start a Claude Code session and it will appear here automatically.' : 'Try a different filter.'}</p>
+        ${state.filter === 'all' ? '<code>python3 setup.py</code>' : ''}
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = filtered.map(s => {
+    const activity = formatActivity(s);
+    const hasPane = !!s.tmux_pane;
+    return `
+    <div class="card status-${s.status}" data-id="${esc(s.session_id)}">
+      <div class="card-header">
+        <div class="card-project">${esc(projectName(s.project_dir))}</div>
+        <div class="card-status">
+          <span class="dot dot-${s.status}"></span>
+          ${s.status}
+        </div>
+      </div>
+      <div class="card-activity">${activity}</div>
+      ${s.last_prompt ? `<div class="card-prompt">"${esc(s.last_prompt.slice(0, 100))}"</div>` : ''}
+      <div class="card-meta">
+        <div class="card-stats">
+          <span>${s.prompt_count || 0} prompts</span>
+          <span>${s.tool_count || 0} tools</span>
+        </div>
+        <div class="card-time">${timeAgo(s.last_activity)}</div>
+      </div>
+      <div class="card-actions">
+        ${hasPane ? `<button class="btn btn-jump" onclick="event.stopPropagation(); jumpTo('${esc(s.session_id)}')">Jump to pane</button>` : ''}
+        <button class="btn" onclick="event.stopPropagation(); showDetail('${esc(s.session_id)}')">Details</button>
+        ${s.status === 'ended' ? `<button class="btn btn-dismiss" onclick="event.stopPropagation(); dismiss('${esc(s.session_id)}')">Dismiss</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Click card to show detail
+  container.querySelectorAll('.card').forEach(card => {
+    card.addEventListener('click', () => showDetail(card.dataset.id));
+  });
+}
+
+async function showDetail(sessionId) {
+  const overlay = document.getElementById('modal-overlay');
+  const content = document.getElementById('modal-content');
+
+  const session = state.sessions.find(s => s.session_id === sessionId);
+  if (!session) return;
+
+  const events = await fetchEvents(sessionId);
+
+  let html = `
+    <h2>${esc(projectName(session.project_dir))}</h2>
+    <div class="modal-meta">
+      <div><strong>Path:</strong> ${esc(shortProject(session.project_dir))}</div>
+      <div><strong>Session:</strong> ${esc(sessionId.slice(0, 16))}…</div>
+      ${session.model ? `<div><strong>Model:</strong> ${esc(session.model)}</div>` : ''}
+      ${session.tmux_window ? `<div><strong>Tmux:</strong> ${esc(session.tmux_window)} (${esc(session.tmux_pane)})</div>` : ''}
+      <div><strong>Started:</strong> ${session.started_at ? new Date(session.started_at).toLocaleString() : '?'}</div>
+      ${session.last_prompt ? `<div><strong>Current task:</strong> "${esc(session.last_prompt.slice(0, 150))}"</div>` : ''}
+    </div>
+    <div class="modal-events">
+      <h3>Recent Activity</h3>
+      ${events.length === 0 ? '<p style="color:var(--text-dim);font-size:0.85rem;">No events recorded yet.</p>' : ''}
+      ${events.map(ev => {
+        let ts = '';
+        if (ev.timestamp) {
+          try { ts = new Date(ev.timestamp).toLocaleTimeString(); } catch {}
+        }
+        const detail = ev.detail ? (ev.detail.length > 80 ? ev.detail.slice(0, 80) + '…' : ev.detail) : '';
+        return `
+          <div class="event-row">
+            <span class="event-time">${esc(ts)}</span>
+            <span class="event-tool">${esc(ev.tool_name || ev.event_type)}</span>
+            <span class="event-detail">${esc(detail)}</span>
+          </div>`;
+      }).join('')}
+    </div>`;
+
+  content.innerHTML = html;
+  overlay.classList.add('visible');
+}
+
+// --- Event handlers ---
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.filter = btn.dataset.filter;
+    renderSessions(state.sessions);
+  });
+});
+
+document.getElementById('modal-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) {
+    e.currentTarget.classList.remove('visible');
+  }
+});
+document.getElementById('modal-close').addEventListener('click', () => {
+  document.getElementById('modal-overlay').classList.remove('visible');
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    document.getElementById('modal-overlay').classList.remove('visible');
+  }
+});
+
+// --- Refresh loop ---
+async function refresh() {
+  state.sessions = await fetchSessions();
+  renderStats(state.sessions);
+  renderSessions(state.sessions);
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
