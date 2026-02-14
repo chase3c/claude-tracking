@@ -194,9 +194,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             pane = row["tmux_pane"]
-            # Send the message as keystrokes to the tmux pane
+            # Send literal text first, then Enter as a separate key
             subprocess.run(
-                ["tmux", "send-keys", "-t", pane, message, "Enter"],
+                ["tmux", "send-keys", "-t", pane, "-l", message],
+                timeout=5,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane, "Enter"],
                 timeout=5,
             )
             self.send_json({"ok": True})

@@ -254,6 +254,44 @@
     border: 1px solid var(--border);
     border-top-left-radius: 2px;
   }
+  .chat-msg-body h1, .chat-msg-body h2, .chat-msg-body h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0.5rem 0 0.25rem;
+  }
+  .chat-msg-body h1 { font-size: 1.05rem; }
+  .chat-msg-body pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    margin: 0.4rem 0;
+    overflow-x: auto;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    white-space: pre;
+  }
+  .chat-msg-body code {
+    background: rgba(88,166,255,0.1);
+    color: var(--blue);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.84em;
+    font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+  }
+  .chat-msg-body pre code {
+    background: none;
+    color: var(--text);
+    padding: 0;
+    font-size: inherit;
+  }
+  .chat-msg-body ul, .chat-msg-body ol {
+    margin: 0.3rem 0;
+    padding-left: 1.5rem;
+  }
+  .chat-msg-body li { margin: 0.15rem 0; }
+  .chat-msg-body strong { color: var(--text); }
   .chat-msg-body .tool-tag {
     display: inline-block;
     background: rgba(188,140,255,0.15);
@@ -506,6 +544,40 @@ function esc(s) {
   return el.innerHTML;
 }
 
+function renderMarkdown(text) {
+  let html = esc(text);
+
+  // Code blocks: ```lang\n...\n```
+  html = html.replace(/```[a-z]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+  html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+
+  // Inline code
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+
+  // Bold
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+  // Italic
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+  // Headers (only at line start)
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Unordered lists
+  html = html.replace(/(?:^|\n)((?:- .+\n?)+)/g, (match, items) => {
+    const lis = items.trim().split('\n')
+      .map(li => `<li>${li.replace(/^- /, '')}</li>`).join('');
+    return `<ul>${lis}</ul>`;
+  });
+
+  // Tool tags
+  html = html.replace(/\[Tool: ([^\]]+)\]/g, '<span class="tool-tag">$1</span>');
+
+  return html;
+}
+
 // --- Rendering ---
 function renderStats(sessions) {
   const counts = {};
@@ -579,9 +651,7 @@ function renderChat(messages) {
 
   container.innerHTML = messages.map(m => {
     const role = m.role;
-    let body = esc(m.content);
-    // Highlight [Tool: xyz] tags
-    body = body.replace(/\[Tool: ([^\]]+)\]/g, '<span class="tool-tag">$1</span>');
+    const body = role === 'assistant' ? renderMarkdown(m.content) : esc(m.content);
     return `
       <div class="chat-msg ${role}">
         <div class="chat-msg-label">${role}</div>
