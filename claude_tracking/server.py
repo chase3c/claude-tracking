@@ -129,6 +129,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
 
             messages = []
+            tool_names = {}  # tool_use_id -> tool name
             with open(path) as f:
                 for line in f:
                     line = line.strip()
@@ -147,6 +148,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     content = msg.get("content", "")
                     if isinstance(content, list):
                         text_parts = []
+                        has_task_result = False
                         for block in content:
                             if isinstance(block, dict):
                                 if block.get("type") == "text":
@@ -155,13 +157,32 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         text_parts.append(text)
                                 elif block.get("type") == "tool_use":
                                     name = block.get("name", "unknown")
+                                    tool_id = block.get("id", "")
+                                    if tool_id:
+                                        tool_names[tool_id] = name
                                     text_parts.append(f"[Tool: {name}]")
                                 elif block.get("type") == "tool_result":
-                                    continue
+                                    tool_id = block.get("tool_use_id", "")
+                                    tool_name = tool_names.get(tool_id, "")
+                                    if tool_name in ("Task", "ExitPlanMode"):
+                                        result_content = block.get("content", "")
+                                        if isinstance(result_content, str) and result_content.strip():
+                                            text_parts.append(result_content.strip())
+                                            has_task_result = True
+                                        elif isinstance(result_content, list):
+                                            for rb in result_content:
+                                                if isinstance(rb, dict) and rb.get("type") == "text":
+                                                    t = rb.get("text", "").strip()
+                                                    if t:
+                                                        text_parts.append(t)
+                                                        has_task_result = True
                             elif isinstance(block, str):
                                 if block.strip():
                                     text_parts.append(block.strip())
                         content = "\n".join(text_parts)
+                        # Task results come in user messages but are really assistant output
+                        if has_task_result and role == "user":
+                            role = "assistant"
                     elif isinstance(content, str):
                         content = content.strip()
 
