@@ -14,5 +14,8 @@ dependencies = [
 [project.scripts]
 claude-track = "claude_tracking.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["claude_tracking*"]
+
 [tool.setuptools.package-data]
 claude_tracking = ["dashboard.html"]
