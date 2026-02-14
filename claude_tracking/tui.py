@@ -158,17 +158,19 @@ def read_transcript(path, max_messages=3):
                     entry = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                role = entry.get("role", "")
+                # Transcript entries wrap the message in an outer object
+                msg = entry.get("message", entry)
+                role = msg.get("role", "")
                 if role != "assistant":
                     continue
-                content = entry.get("content", "")
+                content = msg.get("content", "")
                 if isinstance(content, list):
                     text_parts = []
                     for block in content:
                         if isinstance(block, dict) and block.get("type") == "text":
-                            text_parts.append(block.get("text", ""))
-                        elif isinstance(block, str):
-                            text_parts.append(block)
+                            text = block.get("text", "").strip()
+                            if text:
+                                text_parts.append(text)
                     content = "\n".join(text_parts)
                 if content and content.strip():
                     messages.append(content.strip())
