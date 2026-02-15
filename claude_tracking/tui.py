@@ -12,7 +12,7 @@ from rich.table import Table as RichTable
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid, Vertical, VerticalScroll
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Static
@@ -251,7 +251,7 @@ class PaneOverlay(ModalScreen):
         with Vertical(id="pane-container"):
             yield Static(id="pane-header")
             yield VerticalScroll(Static(id="pane-content"), id="pane-scroll")
-            yield Input(placeholder="Type and press Enter to send…", id="pane-input")
+            yield Input(placeholder="Type and press Enter to send\u2026", id="pane-input")
 
     def on_mount(self):
         # Look up tmux pane from the database
@@ -405,7 +405,7 @@ class PaneOverlay(ModalScreen):
 
 
 # ---------------------------------------------------------------------------
-# SessionTracker — main app with tiled card grid
+# SessionTracker — main app with kanban-style status columns
 # ---------------------------------------------------------------------------
 
 
@@ -414,14 +414,23 @@ class SessionTracker(App):
     Screen {
         background: $surface;
     }
-    #grid-scroll {
+    #columns {
         height: 1fr;
     }
-    #card-grid {
-        grid-size: 3;
-        grid-gutter: 1;
-        padding: 1;
+    .status-column {
+        width: 1fr;
+        height: 1fr;
+        padding: 0 1;
+    }
+    .col-header {
         height: auto;
+        padding: 0 1;
+        text-align: center;
+    }
+    .col-empty {
+        height: auto;
+        padding: 0 1;
+        text-align: center;
     }
     SessionCard {
         height: auto;
@@ -490,24 +499,34 @@ class SessionTracker(App):
     ]
 
     show_ended = reactive(False)
-    selected_index = reactive(0)
+
+    # Column definitions: (col_id, status_key, header_icon)
+    _BASE_COLUMNS = [
+        ("col-waiting", "waiting", "\u26a0"),
+        ("col-idle", "idle", "\u25cf"),
+        ("col-active", "active", "\u25cf"),
+    ]
+    _ENDED_COLUMN = ("col-ended", "ended", "\u25cf")
 
     def __init__(self):
         super().__init__()
-        self._session_ids: list[str] = []
-        self._num_columns = 3
+        # Each entry: (col_id, [session_ids])
+        self._columns: list[tuple[str, list[str]]] = []
+        self._sel_col: int = 0
+        self._sel_row: int = 0
+        # Map session_id -> session dict for quick lookup
+        self._sessions_by_id: dict[str, dict] = {}
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield VerticalScroll(Grid(id="card-grid"), id="grid-scroll")
+        with Horizontal(id="columns"):
+            for col_id, _status, _icon in self._BASE_COLUMNS:
+                with VerticalScroll(id=col_id, classes="status-column"):
+                    yield Static(classes="col-header")
         yield Static(id="status-bar")
         yield Footer()
 
     async def on_mount(self):
-        self._num_columns = self._compute_columns()
-        grid = self.query_one("#card-grid", Grid)
-        grid.styles.grid_size_columns = self._num_columns
-
         # Start bridge watcher for container sessions
         from .server import bridge_watcher
         self._bridge_stop = threading.Event()
@@ -519,23 +538,16 @@ class SessionTracker(App):
         await self.refresh_data()
         self.set_interval(REFRESH_SECONDS, self.refresh_data)
 
-    def on_resize(self, _event):
-        num_cols = self._compute_columns()
-        if num_cols != self._num_columns:
-            self._num_columns = num_cols
-            grid = self.query_one("#card-grid", Grid)
-            grid.styles.grid_size_columns = num_cols
-
-    def _compute_columns(self) -> int:
-        width = self.size.width
-        if width < 80:
-            return 1
-        if width < 120:
-            return 2
-        return 3
+    def _get_column_defs(self):
+        """Return active column definitions based on show_ended state."""
+        cols = list(self._BASE_COLUMNS)
+        if self.show_ended:
+            cols.append(self._ENDED_COLUMN)
+        return cols
 
     async def refresh_data(self):
         sessions = fetch_sessions(show_all=self.show_ended)
+        self._sessions_by_id = {s["session_id"]: s for s in sessions}
 
         # Status bar summary
         counts: dict[str, int] = {}
@@ -554,75 +566,176 @@ class SessionTracker(App):
         )
 
         # Preserve selection by session_id
-        old_selected_id = None
-        if self._session_ids and 0 <= self.selected_index < len(self._session_ids):
-            old_selected_id = self._session_ids[self.selected_index]
+        old_selected_id = self._get_selected_session_id()
 
-        new_session_ids = [s["session_id"] for s in sessions]
-        grid = self.query_one("#card-grid", Grid)
+        # Bucket sessions into columns
+        col_defs = self._get_column_defs()
+        buckets: dict[str, list[dict]] = {col_id: [] for col_id, _, _ in col_defs}
+        for s in sessions:
+            status = s["status"]
+            if status == "waiting":
+                buckets["col-waiting"].append(s)
+            elif status == "idle":
+                buckets["col-idle"].append(s)
+            elif status == "active":
+                buckets["col-active"].append(s)
+            elif status in ("ended", "dismissed") and "col-ended" in buckets:
+                buckets["col-ended"].append(s)
 
-        if new_session_ids == self._session_ids:
-            # Same sessions in same order — update in-place
-            cards = list(grid.query(SessionCard))
-            for card, session in zip(cards, sessions):
-                card.session_data = session
+        # Build old column data for diffing
+        old_col_sids = {col_id: sids for col_id, sids in self._columns}
+
+        # Update columns tracking
+        new_columns: list[tuple[str, list[str]]] = []
+        for col_id, _status_key, _icon in col_defs:
+            sids = [s["session_id"] for s in buckets.get(col_id, [])]
+            new_columns.append((col_id, sids))
+
+        # Update each column's widgets
+        for col_id, status_key, icon in col_defs:
+            try:
+                container = self.query_one(f"#{col_id}", VerticalScroll)
+            except Exception:
+                continue
+
+            col_sessions = buckets.get(col_id, [])
+            new_sids = [s["session_id"] for s in col_sessions]
+            old_sids = old_col_sids.get(col_id, [])
+
+            # Update header
+            status_label = status_key.upper()
+            header = container.query(".col-header")
+            if header:
+                header.first().update(
+                    f"{icon} {status_label} ({len(col_sessions)})"
+                )
+
+            if new_sids == old_sids:
+                # Same sessions — update cards in-place
+                cards = list(container.query(SessionCard))
+                for card, session in zip(cards, col_sessions):
+                    card.session_data = session
+            else:
+                # Remove old cards and empty placeholders
+                for card in list(container.query(SessionCard)):
+                    await card.remove()
+                for empty in list(container.query(".col-empty")):
+                    await empty.remove()
+
+                if col_sessions:
+                    new_cards = [SessionCard(s) for s in col_sessions]
+                    await container.mount_all(new_cards)
+                else:
+                    await container.mount(
+                        Static("[dim]None[/]", classes="col-empty")
+                    )
+
+        self._columns = new_columns
+
+        # Restore selection — follow by session_id if it moved columns
+        if old_selected_id:
+            found = False
+            for ci, (col_id, sids) in enumerate(self._columns):
+                if old_selected_id in sids:
+                    self._sel_col = ci
+                    self._sel_row = sids.index(old_selected_id)
+                    found = True
+                    break
+            if not found:
+                self._clamp_selection()
         else:
-            # Sessions changed — rebuild grid
-            await grid.remove_children()
-            new_cards = [SessionCard(session) for session in sessions]
-            if new_cards:
-                await grid.mount_all(new_cards)
-            self._session_ids = new_session_ids
-
-        # Restore selection
-        if old_selected_id and old_selected_id in self._session_ids:
-            self.selected_index = self._session_ids.index(old_selected_id)
-        elif self._session_ids:
-            self.selected_index = min(
-                self.selected_index, len(self._session_ids) - 1
-            )
-        else:
-            self.selected_index = 0
+            self._clamp_selection()
 
         self._update_selection()
 
+    def _clamp_selection(self):
+        """Clamp selection to valid bounds."""
+        if not self._columns:
+            self._sel_col = 0
+            self._sel_row = 0
+            return
+        self._sel_col = min(self._sel_col, len(self._columns) - 1)
+        col_sids = self._columns[self._sel_col][1]
+        if col_sids:
+            self._sel_row = min(self._sel_row, len(col_sids) - 1)
+        else:
+            self._sel_row = 0
+
     def _update_selection(self):
-        grid = self.query_one("#card-grid", Grid)
-        cards = list(grid.query(SessionCard))
-        for i, card in enumerate(cards):
-            if i == self.selected_index:
-                card.add_class("card-selected")
-                card.scroll_visible()
-            else:
-                card.remove_class("card-selected")
+        # Clear all selections
+        for card in self.query(SessionCard):
+            card.remove_class("card-selected")
+
+        sid = self._get_selected_session_id()
+        if not sid:
+            return
+
+        # Find and highlight the selected card
+        for col_id, sids in self._columns:
+            if sid in sids:
+                idx = sids.index(sid)
+                try:
+                    container = self.query_one(f"#{col_id}", VerticalScroll)
+                    cards = list(container.query(SessionCard))
+                    if 0 <= idx < len(cards):
+                        cards[idx].add_class("card-selected")
+                        cards[idx].scroll_visible()
+                except Exception:
+                    pass
+                break
 
     def _get_selected_session_id(self):
-        if self._session_ids and 0 <= self.selected_index < len(self._session_ids):
-            return self._session_ids[self.selected_index]
+        if not self._columns:
+            return None
+        if 0 <= self._sel_col < len(self._columns):
+            sids = self._columns[self._sel_col][1]
+            if sids and 0 <= self._sel_row < len(sids):
+                return sids[self._sel_row]
         return None
 
     # -- Navigation ----------------------------------------------------------
 
     def action_move_left(self):
-        if self.selected_index > 0:
-            self.selected_index -= 1
-            self._update_selection()
+        if not self._columns:
+            return
+        new_col = self._sel_col - 1
+        if new_col < 0:
+            return
+        self._sel_col = new_col
+        col_sids = self._columns[self._sel_col][1]
+        if col_sids:
+            self._sel_row = min(self._sel_row, len(col_sids) - 1)
+        else:
+            self._sel_row = 0
+        self._update_selection()
 
     def action_move_right(self):
-        if self.selected_index < len(self._session_ids) - 1:
-            self.selected_index += 1
-            self._update_selection()
+        if not self._columns:
+            return
+        new_col = self._sel_col + 1
+        if new_col >= len(self._columns):
+            return
+        self._sel_col = new_col
+        col_sids = self._columns[self._sel_col][1]
+        if col_sids:
+            self._sel_row = min(self._sel_row, len(col_sids) - 1)
+        else:
+            self._sel_row = 0
+        self._update_selection()
 
     def action_move_down(self):
-        new = self.selected_index + self._num_columns
-        if new < len(self._session_ids):
-            self.selected_index = new
+        if not self._columns:
+            return
+        col_sids = self._columns[self._sel_col][1]
+        if self._sel_row < len(col_sids) - 1:
+            self._sel_row += 1
             self._update_selection()
 
     def action_move_up(self):
-        new = self.selected_index - self._num_columns
-        if new >= 0:
-            self.selected_index = new
+        if not self._columns:
+            return
+        if self._sel_row > 0:
+            self._sel_row -= 1
             self._update_selection()
 
     # -- Actions -------------------------------------------------------------
@@ -668,6 +781,22 @@ class SessionTracker(App):
 
     async def action_show_all(self):
         self.show_ended = not self.show_ended
+        columns_container = self.query_one("#columns", Horizontal)
+        if self.show_ended:
+            # Mount the ended column
+            col = VerticalScroll(
+                Static(classes="col-header"),
+                id="col-ended",
+                classes="status-column",
+            )
+            await columns_container.mount(col)
+        else:
+            # Remove the ended column
+            try:
+                ended_col = self.query_one("#col-ended", VerticalScroll)
+                await ended_col.remove()
+            except Exception:
+                pass
         await self.refresh_data()
 
     async def action_force_refresh(self):
