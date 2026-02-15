@@ -15,7 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Static
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 REFRESH_SECONDS = 3
@@ -235,8 +235,12 @@ class PaneOverlay(ModalScreen):
         padding: 0 1;
         height: auto;
     }
-    #pane-input {
+    #pane-hint {
         dock: bottom;
+        height: 1;
+        padding: 0 2;
+        background: $panel;
+        color: $text-muted;
     }
     """
 
@@ -251,7 +255,10 @@ class PaneOverlay(ModalScreen):
         with Vertical(id="pane-container"):
             yield Static(id="pane-header")
             yield VerticalScroll(Static(id="pane-content"), id="pane-scroll")
-            yield Input(placeholder="Type and press Enter to send\u2026", id="pane-input")
+            yield Static(
+                "j/k: navigate \u00b7 Enter: select \u00b7 1\u20135: pick \u00b7 Tab: amend \u00b7 g: jump \u00b7 d: dismiss \u00b7 Esc: close",
+                id="pane-hint",
+            )
 
     def on_mount(self):
         # Look up tmux pane from the database
@@ -277,7 +284,6 @@ class PaneOverlay(ModalScreen):
             )
             return
 
-        self.query_one("#pane-input", Input).focus()
         self._refresh_pane()
         self._timer = self.set_interval(0.75, self._refresh_pane)
 
@@ -342,36 +348,24 @@ class PaneOverlay(ModalScreen):
         if at_bottom:
             scroll.scroll_end(animate=False)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def _send_key(self, key: str):
+        """Send a single key to the tmux pane."""
         if not self._tmux_pane or not self._pane_alive:
-            return
-        text = event.value
-        if not text:
             return
         try:
             subprocess.run(
-                ["tmux", "send-keys", "-t", self._tmux_pane, "-l", text],
-                timeout=2,
-            )
-            subprocess.run(
-                ["tmux", "send-keys", "-t", self._tmux_pane, "Enter"],
+                ["tmux", "send-keys", "-t", self._tmux_pane, key],
                 timeout=2,
             )
         except Exception:
             pass
-        self.query_one("#pane-input", Input).clear()
-        # Snap back to bottom after sending input
-        self.query_one("#pane-scroll", VerticalScroll).scroll_end(animate=False)
         self._refresh_pane()
 
     def action_close_overlay(self):
         self.dismiss()
 
     def on_key(self, event) -> None:
-        """Handle g/d shortcuts only when input is NOT focused."""
-        input_widget = self.query_one("#pane-input", Input)
-        if input_widget.has_focus:
-            return
+        """Forward navigation keys to tmux pane for permission picker."""
         if event.key == "g":
             event.prevent_default()
             event.stop()
@@ -380,6 +374,22 @@ class PaneOverlay(ModalScreen):
             event.prevent_default()
             event.stop()
             self._do_dismiss_session()
+        elif event.key in ("j", "k"):
+            event.prevent_default()
+            event.stop()
+            self._send_key(event.key)
+        elif event.key == "enter":
+            event.prevent_default()
+            event.stop()
+            self._send_key("Enter")
+        elif event.key == "tab":
+            event.prevent_default()
+            event.stop()
+            self._send_key("Tab")
+        elif event.key in ("1", "2", "3", "4", "5"):
+            event.prevent_default()
+            event.stop()
+            self._send_key(event.key)
 
     def _do_jump(self):
         if not self._tmux_pane:
