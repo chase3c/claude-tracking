@@ -2,7 +2,6 @@
 
 Run in a tmux pane to monitor all your Claude Code sessions.
 """
-import json
 import os
 import sqlite3
 import subprocess
@@ -10,12 +9,13 @@ import threading
 from datetime import datetime
 
 from rich.table import Table as RichTable
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Grid, VerticalScroll
+from textual.containers import Grid, Vertical, VerticalScroll
 from textual.reactive import reactive
-from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.screen import ModalScreen
+from textual.widgets import Footer, Header, Input, Static
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 REFRESH_SECONDS = 3
@@ -134,79 +134,6 @@ def fetch_sessions(show_all=False):
         return []
 
 
-def fetch_events(session_id):
-    if not os.path.exists(DB_PATH):
-        return []
-    try:
-        db = sqlite3.connect(DB_PATH)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=1000")
-        rows = db.execute("""
-            SELECT * FROM events
-            WHERE session_id = ?
-            ORDER BY timestamp DESC
-            LIMIT 20
-        """, (session_id,)).fetchall()
-        db.close()
-        return [dict(r) for r in rows]
-    except Exception:
-        return []
-
-
-def _read_transcript_lines(path, source="host"):
-    """Read raw lines from a transcript file, using docker exec for containers."""
-    if path and os.path.exists(path):
-        with open(path) as f:
-            return f.readlines()
-    if source.startswith("container:"):
-        container_id = source[len("container:"):]
-        try:
-            result = subprocess.run(
-                ["docker", "exec", container_id, "cat", path],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0 and result.stdout:
-                return result.stdout.splitlines(keepends=True)
-        except Exception:
-            pass
-    return []
-
-
-def read_transcript(path, max_messages=3, source="host"):
-    """Read recent assistant text output from a transcript JSONL file."""
-    if not path:
-        return []
-    messages = []
-    try:
-        for line in _read_transcript_lines(path, source):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            # Transcript entries wrap the message in an outer object
-            msg = entry.get("message", entry)
-            role = msg.get("role", "")
-            if role != "assistant":
-                continue
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                text_parts = []
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        text = block.get("text", "").strip()
-                        if text:
-                            text_parts.append(text)
-                content = "\n".join(text_parts)
-            if content and content.strip():
-                messages.append(content.strip())
-    except Exception:
-        return []
-    return messages[-max_messages:]
-
-
 # ---------------------------------------------------------------------------
 # SessionCard — one tile per session
 # ---------------------------------------------------------------------------
@@ -274,118 +201,60 @@ class SessionCard(Static):
 
 
 # ---------------------------------------------------------------------------
-# DetailScreen — full-screen overlay for a single session
+# PaneOverlay — modal overlay showing live tmux pane content
 # ---------------------------------------------------------------------------
 
 
-class DetailScreen(Screen):
-    """Full-screen detail view showing session info and transcript."""
+class PaneOverlay(ModalScreen):
+    """Modal overlay showing live tmux pane output with input capability."""
 
     BINDINGS = [
-        Binding("escape", "go_back", "Back"),
-        Binding("q", "go_back", "Back", show=False),
-        Binding("g", "jump", "Jump to pane"),
-        Binding("d", "dismiss_session", "Dismiss"),
-        Binding("r", "refresh", "Refresh"),
-        Binding("j", "scroll_down", "Down", show=False),
-        Binding("k", "scroll_up", "Up", show=False),
-        Binding("down", "scroll_down", "Down", show=False),
-        Binding("up", "scroll_up", "Up", show=False),
+        Binding("escape", "close_overlay", "Close", priority=True),
     ]
 
     CSS = """
-    DetailScreen {
+    PaneOverlay {
+        align: center middle;
+    }
+    #pane-container {
+        width: 90%;
+        height: 90%;
+        border: round $accent;
         background: $surface;
     }
-    #detail-header {
-        padding: 1 2;
+    #pane-header {
+        height: auto;
+        padding: 0 2;
         background: $panel;
         border-bottom: tall $accent;
-        height: auto;
     }
-    #detail-scroll {
+    #pane-scroll {
         height: 1fr;
     }
-    #detail-body {
-        padding: 1 2;
+    #pane-content {
+        padding: 0 1;
         height: auto;
+    }
+    #pane-input {
+        dock: bottom;
     }
     """
 
     def __init__(self, session_id: str, **kwargs):
         super().__init__(**kwargs)
         self.session_id = session_id
+        self._tmux_pane: str | None = None
+        self._pane_alive = True
+        self._timer = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
-        yield Static(id="detail-header")
-        yield VerticalScroll(Static(id="detail-body"), id="detail-scroll")
-        yield Footer()
+        with Vertical(id="pane-container"):
+            yield Static(id="pane-header")
+            yield VerticalScroll(Static(id="pane-content"), id="pane-scroll")
+            yield Input(placeholder="Type and press Enter to send…", id="pane-input")
 
     def on_mount(self):
-        self._refresh_detail()
-        self._timer = self.set_interval(REFRESH_SECONDS, self._refresh_detail)
-
-    def _refresh_detail(self):
-        sessions = fetch_sessions(show_all=True)
-        session = next(
-            (s for s in sessions if s["session_id"] == self.session_id), None
-        )
-        if not session:
-            self.query_one("#detail-header", Static).update(
-                "[dim]Session not found[/]"
-            )
-            return
-
-        # Header
-        lines = []
-        status_label = STATUS_LABELS.get(
-            session.get("status", ""), session.get("status", "")
-        )
-        sid_short = self.session_id[:12]
-        lines.append(
-            f"[bold]{short_project(session.get('project_dir', ''))}[/]"
-            f"  {status_label}  [dim]{sid_short}[/]"
-        )
-        if session.get("model"):
-            lines.append(f"[dim]Model:[/] {session['model']}")
-        if session.get("tmux_window"):
-            pane = session.get("tmux_pane", "?")
-            lines.append(f"[dim]Tmux:[/] {session['tmux_window']} ({pane})")
-        if session.get("last_prompt"):
-            prompt = session["last_prompt"][:100]
-            lines.append(f'[dim]Task:[/] "{prompt}"')
-
-        self.query_one("#detail-header", Static).update("\n".join(lines))
-
-        # Body — transcript
-        transcript = session.get("transcript_path", "")
-        source = session.get("source", "host") or "host"
-        recent_output = read_transcript(transcript, max_messages=20, source=source)
-
-        body_lines = []
-        if recent_output:
-            body_lines.append("[bold]Transcript[/]\n")
-            for msg in recent_output:
-                preview = msg.replace("\n", " ")
-                if len(preview) > 500:
-                    preview = preview[:500] + "\u2026"
-                body_lines.append(f"  [white]{preview}[/]\n")
-        else:
-            body_lines.append("[dim]No transcript available[/]")
-
-        self.query_one("#detail-body", Static).update("\n".join(body_lines))
-
-    def action_go_back(self):
-        self.dismiss()
-
-    def action_scroll_down(self):
-        self.query_one("#detail-scroll", VerticalScroll).scroll_down()
-
-    def action_scroll_up(self):
-        self.query_one("#detail-scroll", VerticalScroll).scroll_up()
-
-    def action_jump(self):
+        # Look up tmux pane from the database
         try:
             db = sqlite3.connect(DB_PATH)
             db.row_factory = sqlite3.Row
@@ -394,14 +263,134 @@ class DetailScreen(Screen):
                 (self.session_id,),
             ).fetchone()
             db.close()
-            if row and row["tmux_pane"]:
-                pane = row["tmux_pane"]
-                subprocess.run(["tmux", "select-window", "-t", pane], timeout=2)
-                subprocess.run(["tmux", "select-pane", "-t", pane], timeout=2)
+            if row:
+                self._tmux_pane = row["tmux_pane"]
         except Exception:
             pass
 
-    def action_dismiss_session(self):
+        if not self._tmux_pane:
+            self.query_one("#pane-header", Static).update(
+                "[dim]No tmux pane found for this session[/]"
+            )
+            self.query_one("#pane-content", Static).update(
+                "[dim]This session has no associated tmux pane.[/]"
+            )
+            return
+
+        self.query_one("#pane-input", Input).focus()
+        self._refresh_pane()
+        self._timer = self.set_interval(0.75, self._refresh_pane)
+
+    def _refresh_pane(self):
+        if not self._tmux_pane or not self._pane_alive:
+            return
+
+        # Update header from DB
+        try:
+            db = sqlite3.connect(DB_PATH)
+            db.row_factory = sqlite3.Row
+            session = db.execute(
+                "SELECT * FROM sessions WHERE session_id = ?",
+                (self.session_id,),
+            ).fetchone()
+            db.close()
+        except Exception:
+            session = None
+
+        if session:
+            status = session["status"] or "unknown"
+            status_label = STATUS_LABELS.get(status, status)
+            project = short_project(session["project_dir"] or "")
+            model = session["model"] or ""
+            header = (
+                f"[bold]{project}[/]  {status_label}"
+                f"  [dim]{self._tmux_pane}[/]"
+            )
+            if model:
+                header += f"  [dim]{model}[/]"
+            self.query_one("#pane-header", Static).update(header)
+
+        # Capture tmux pane content with scrollback history
+        scroll = self.query_one("#pane-scroll", VerticalScroll)
+        at_bottom = scroll.scroll_y >= scroll.max_scroll_y - 2
+
+        try:
+            result = subprocess.run(
+                ["tmux", "capture-pane", "-t", self._tmux_pane,
+                 "-p", "-e", "-S", "-500"],
+                capture_output=True, text=True, timeout=3,
+            )
+            if result.returncode != 0:
+                self._pane_alive = False
+                self.query_one("#pane-content", Static).update(
+                    "[dim]Pane no longer exists.[/]"
+                )
+                if self._timer:
+                    self._timer.stop()
+                return
+            content = Text.from_ansi(result.stdout)
+        except FileNotFoundError:
+            self._pane_alive = False
+            content = Text("tmux is not installed or not in PATH.")
+            if self._timer:
+                self._timer.stop()
+        except subprocess.TimeoutExpired:
+            content = Text("tmux capture-pane timed out.")
+
+        self.query_one("#pane-content", Static).update(content)
+        # Only auto-scroll if user was already at the bottom
+        if at_bottom:
+            scroll.scroll_end(animate=False)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if not self._tmux_pane or not self._pane_alive:
+            return
+        text = event.value
+        if not text:
+            return
+        try:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", self._tmux_pane, "-l", text],
+                timeout=2,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", self._tmux_pane, "Enter"],
+                timeout=2,
+            )
+        except Exception:
+            pass
+        self.query_one("#pane-input", Input).clear()
+        # Snap back to bottom after sending input
+        self.query_one("#pane-scroll", VerticalScroll).scroll_end(animate=False)
+        self._refresh_pane()
+
+    def action_close_overlay(self):
+        self.dismiss()
+
+    def on_key(self, event) -> None:
+        """Handle g/d shortcuts only when input is NOT focused."""
+        input_widget = self.query_one("#pane-input", Input)
+        if input_widget.has_focus:
+            return
+        if event.key == "g":
+            event.prevent_default()
+            event.stop()
+            self._do_jump()
+        elif event.key == "d":
+            event.prevent_default()
+            event.stop()
+            self._do_dismiss_session()
+
+    def _do_jump(self):
+        if not self._tmux_pane:
+            return
+        try:
+            subprocess.run(["tmux", "select-window", "-t", self._tmux_pane], timeout=2)
+            subprocess.run(["tmux", "select-pane", "-t", self._tmux_pane], timeout=2)
+        except Exception:
+            pass
+
+    def _do_dismiss_session(self):
         try:
             db = sqlite3.connect(DB_PATH)
             db.execute(
@@ -413,9 +402,6 @@ class DetailScreen(Screen):
             self.dismiss()
         except Exception:
             pass
-
-    def action_refresh(self):
-        self._refresh_detail()
 
 
 # ---------------------------------------------------------------------------
@@ -644,7 +630,7 @@ class SessionTracker(App):
     def action_open_detail(self):
         sid = self._get_selected_session_id()
         if sid:
-            self.push_screen(DetailScreen(sid))
+            self.push_screen(PaneOverlay(sid))
 
     def action_jump(self):
         sid = self._get_selected_session_id()
