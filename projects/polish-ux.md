@@ -5,16 +5,13 @@
 - [x] Fix web dashboard "Send" — added error handling to tmux send-keys (pre-flight pane check, capture stderr, surface errors in chat UI)
 - [x] Show Task and plan output in web dashboard transcript
 
-## Next up
-
-- [ ] TUI: Permission granting from pane overlay — pass through arrow keys, j/k, Enter to tmux pane so user can interact with Claude's permission selector without leaving the TUI
-
 ## In Progress
 
 - [ ] Investigate filing a Claude Code issue for missing permission denial hook event (PermissionRequest fires but nothing fires when user denies — known gap, see #19628, #13024)
 
 ## Done (recent)
 
+- [x] TUI: Permission granting from pane overlay — replaced text input with key passthrough (j/k/Enter/1-5/Tab) to interact with Claude's permission picker without leaving the TUI
 - [x] Permission-aware session status tracking (`pending_permissions` counter in DB)
   - Increment on `PermissionRequest`, decrement on `PostToolUse`/`PostToolUseFailure`
   - Reset on `Stop`, `UserPromptSubmit`, `SessionEnd`, `Notification(idle_prompt)`

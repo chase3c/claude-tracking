@@ -49,7 +49,7 @@ Replaced flat grid with kanban-style status columns: Waiting → Idle → Active
 - `SessionCard(Static)` renders Rich Table markup with 4 lines: project+status, activity, last prompt, counts+time
 - Waiting sessions show bold orange "NEEDS PERMISSION" label
 - `PaneOverlay(ModalScreen)` replaced `DetailScreen` — shows live tmux pane content via `tmux capture-pane -p -e -S -500`, auto-refreshes every 0.75s
-  - Input bar sends commands via `tmux send-keys`
+  - Key passthrough forwards j/k/Enter/1-5/Tab to tmux pane for permission picker interaction
   - Scrollback: captures 500 lines of history, preserves scroll position (only auto-scrolls if already at bottom)
   - `g` jumps to the tmux pane, `d` dismisses, Escape closes
   - Removed all transcript/JSONL parsing (`fetch_events`, `read_transcript`, `_read_transcript_lines`, `import json`)
