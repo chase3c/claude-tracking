@@ -59,6 +59,12 @@ def init_db(db):
         db.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate: add pending_permissions counter
+    try:
+        db.execute("ALTER TABLE sessions ADD COLUMN pending_permissions INTEGER DEFAULT 0")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     db.commit()
 
 
@@ -103,17 +109,43 @@ def extract_detail(event_name, tool_name, tool_input):
     return ""
 
 
-def derive_status(event_name):
+def derive_status(event_name, pending_permissions=0, notification_type="",
+                  current_status="active"):
+    """Derive session status from event name and pending permission count.
+
+    Permission-aware: a PostToolUse only clears 'waiting' if all pending
+    permission requests have been resolved. Events that aren't meaningful
+    status signals (SubagentStart/Stop, unknown Notifications) preserve
+    the current status.
+    """
     if event_name == "Stop":
+        return "idle"
+    if event_name == "Notification" and notification_type == "idle_prompt":
         return "idle"
     if event_name == "SessionEnd":
         return "ended"
     if event_name == "PermissionRequest":
         return "waiting"
-    return "active"
+    if event_name == "Notification" and notification_type == "permission_prompt":
+        return "waiting"
+    # For PostToolUse/PostToolUseFailure: stay 'waiting' if more are pending
+    if event_name in ("PostToolUse", "PostToolUseFailure"):
+        return "waiting" if pending_permissions > 0 else "active"
+    # Active work signals
+    if event_name in ("UserPromptSubmit", "PreToolUse"):
+        return "active"
+    # SubagentStart/Stop, other Notifications, etc. — don't change status
+    return current_status
 
 
 def track(data, source=None, tmux_pane_override=None):
+    # Debug: dump raw hook payload
+    try:
+        with open("/tmp/hook-dump.jsonl", "a") as f:
+            f.write(json.dumps(data) + "\n")
+    except Exception:
+        pass
+
     now = datetime.now().isoformat()
     session_id = data.get("session_id", "unknown")
     event_name = data.get("hook_event_name", "unknown")
@@ -122,6 +154,7 @@ def track(data, source=None, tmux_pane_override=None):
     tool_input = data.get("tool_input", {})
     model = data.get("model", "")
     transcript_path = data.get("transcript_path", "")
+    notification_type = data.get("notification_type", "")
     source = source or "host"
 
     if tmux_pane_override:
@@ -145,19 +178,44 @@ def track(data, source=None, tmux_pane_override=None):
     else:
         pane, window, tmux_session = get_tmux_info()
     detail = extract_detail(event_name, tool_name, tool_input)
-    status = derive_status(event_name)
 
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     db = sqlite3.connect(DB_PATH)
     init_db(db)
 
     existing = db.execute(
-        "SELECT session_id FROM sessions WHERE session_id = ?", (session_id,)
+        "SELECT session_id, pending_permissions, status FROM sessions WHERE session_id = ?",
+        (session_id,),
     ).fetchone()
 
+    # Compute new pending_permissions count
     if existing:
-        updates = ["last_activity = ?", "last_event = ?", "status = ?"]
-        params = [now, event_name, status]
+        current_pending = existing[1] or 0
+        current_status = existing[2] or "active"
+    else:
+        current_pending = 0
+        current_status = "active"
+
+    is_idle_notification = (event_name == "Notification" and notification_type == "idle_prompt")
+
+    if event_name == "PermissionRequest":
+        new_pending = current_pending + 1
+    elif event_name in ("PostToolUse", "PostToolUseFailure"):
+        new_pending = max(0, current_pending - 1)
+    elif event_name in ("Stop", "UserPromptSubmit", "SessionEnd") or is_idle_notification:
+        # Session moved on — all pending permissions are moot
+        new_pending = 0
+    else:
+        new_pending = current_pending
+
+    status = derive_status(event_name, pending_permissions=new_pending,
+                           notification_type=notification_type,
+                           current_status=current_status)
+
+    if existing:
+        updates = ["last_activity = ?", "last_event = ?", "status = ?",
+                    "pending_permissions = ?"]
+        params = [now, event_name, status, new_pending]
 
         if pane:
             updates.append("tmux_pane = ?")
@@ -208,15 +266,15 @@ def track(data, source=None, tmux_pane_override=None):
                (session_id, project_dir, tmux_pane, tmux_window, tmux_session,
                 status, started_at, last_activity, last_event, last_tool,
                 last_detail, last_prompt, prompt_count, tool_count, model,
-                transcript_path, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                transcript_path, source, pending_permissions)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, cwd, pane, window, tmux_session,
                 status, now, now, event_name, tool_name,
                 detail, prompt_text,
                 1 if event_name == "UserPromptSubmit" else 0,
                 1 if tool_name else 0,
-                model, transcript_path, source,
+                model, transcript_path, source, new_pending,
             ),
         )
 

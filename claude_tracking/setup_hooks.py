@@ -26,6 +26,18 @@ HOOK_EVENTS = {
     "SessionEnd": [
         {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5}]}
     ],
+    "PostToolUseFailure": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5, "async": True}]}
+    ],
+    "SubagentStart": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5}]}
+    ],
+    "SubagentStop": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5}]}
+    ],
+    "Notification": [
+        {"hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 5}]}
+    ],
 }
 
 
