@@ -126,6 +126,7 @@ def fetch_sessions(show_all=False):
                     WHEN 'ended' THEN 3
                     WHEN 'dismissed' THEN 4
                 END,
+                COALESCE(is_priority, 0) DESC,
                 last_activity DESC
         """).fetchall()
         db.close()
@@ -178,7 +179,8 @@ class SessionCard(Static):
         table.add_column("right", justify="right", no_wrap=True)
 
         # Line 1: project name + status
-        table.add_row(f"[bold]{project}[/]", status_label)
+        priority_marker = "[bold #bb77ff]★[/] " if s.get("is_priority") else ""
+        table.add_row(f"{priority_marker}[bold]{project}[/]", status_label)
 
         # Line 2: current activity
         table.add_row(activity if activity else "[dim]\u2014[/]", "")
@@ -198,6 +200,10 @@ class SessionCard(Static):
             self.remove_class(cls)
         status = data.get("status", "unknown") if data else "unknown"
         self.add_class(f"status-{status}")
+        if data and data.get("is_priority"):
+            self.add_class("card-priority")
+        else:
+            self.remove_class("card-priority")
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +487,41 @@ class SessionTracker(App):
         border: double #666666;
         background: $boost;
     }
+    SessionCard.card-priority {
+        border: thick #bb77ff;
+    }
+    SessionCard.card-priority.status-active {
+        border: thick #bb77ff;
+    }
+    SessionCard.card-priority.status-waiting {
+        border: thick #bb77ff;
+    }
+    SessionCard.card-priority.status-idle {
+        border: thick #bb77ff;
+    }
+    SessionCard.card-priority.status-ended {
+        border: thick #bb77ff;
+    }
+    SessionCard.card-selected.card-priority {
+        border: double #bb77ff;
+        background: $boost;
+    }
+    SessionCard.card-selected.card-priority.status-active {
+        border: double #bb77ff;
+        background: $boost;
+    }
+    SessionCard.card-selected.card-priority.status-waiting {
+        border: double #bb77ff;
+        background: $boost;
+    }
+    SessionCard.card-selected.card-priority.status-idle {
+        border: double #bb77ff;
+        background: $boost;
+    }
+    SessionCard.card-selected.card-priority.status-ended {
+        border: double #bb77ff;
+        background: $boost;
+    }
     #status-bar {
         height: 1;
         padding: 0 2;
@@ -503,6 +544,7 @@ class SessionTracker(App):
         Binding("space", "open_detail", "Detail"),
         Binding("enter", "open_detail", "Detail", show=False),
         Binding("g", "jump", "Jump to pane"),
+        Binding("p", "toggle_priority", "Priority"),
         Binding("d", "dismiss", "Dismiss"),
         Binding("a", "show_all", "Show ended"),
         Binding("r", "force_refresh", "Refresh"),
@@ -569,10 +611,12 @@ class SessionTracker(App):
             if counts.get(status, 0) > 0:
                 summary_parts.append(f"{counts[status]} {status}")
         summary = " \u00b7 ".join(summary_parts) if summary_parts else "No sessions"
+        priority_count = sum(1 for s in sessions if s.get("is_priority"))
+        priority_label = f"  \u00b7  [bold #bb77ff]\u2605 {priority_count} priority[/]" if priority_count else ""
         mode = "  \u00b7  [bold]Showing all[/]" if self.show_ended else ""
 
         self.query_one("#status-bar", Static).update(
-            f" {summary}  \u00b7  Refreshing every {REFRESH_SECONDS}s{mode}"
+            f" {summary}{priority_label}  \u00b7  Refreshing every {REFRESH_SECONDS}s{mode}"
         )
 
         # Preserve selection by session_id
@@ -782,6 +826,28 @@ class SessionTracker(App):
             db.execute(
                 "UPDATE sessions SET status = 'dismissed' WHERE session_id = ?",
                 (sid,),
+            )
+            db.commit()
+            db.close()
+            await self.refresh_data()
+        except Exception:
+            pass
+
+    async def action_toggle_priority(self):
+        sid = self._get_selected_session_id()
+        if not sid:
+            return
+        try:
+            db = sqlite3.connect(DB_PATH)
+            db.execute("PRAGMA busy_timeout=1000")
+            row = db.execute(
+                "SELECT COALESCE(is_priority, 0) FROM sessions WHERE session_id = ?",
+                (sid,),
+            ).fetchone()
+            new_val = 0 if (row and row[0]) else 1
+            db.execute(
+                "UPDATE sessions SET is_priority = ? WHERE session_id = ?",
+                (new_val, sid),
             )
             db.commit()
             db.close()

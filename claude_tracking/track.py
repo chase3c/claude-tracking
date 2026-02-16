@@ -65,6 +65,12 @@ def init_db(db):
         db.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate: add is_priority flag
+    try:
+        db.execute("ALTER TABLE sessions ADD COLUMN is_priority INTEGER DEFAULT 0")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     db.commit()
 
 
