@@ -18,7 +18,51 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
+TUI_PANE_FILE = os.path.expanduser("~/.claude/tui-pane")
 REFRESH_SECONDS = 3
+JUMP_BACK_KEY = "t"  # prefix + t to jump back to TUI
+
+
+def _register_tui_pane():
+    """Save this TUI's tmux pane location and register a jump-back keybinding."""
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        return
+    # Get our session name
+    session = ""
+    try:
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "-t", pane, "#S"],
+            capture_output=True, text=True, timeout=2,
+        )
+        session = result.stdout.strip()
+    except Exception:
+        pass
+    # Write pane info so the keybinding can read it
+    try:
+        os.makedirs(os.path.dirname(TUI_PANE_FILE), exist_ok=True)
+        with open(TUI_PANE_FILE, "w") as f:
+            f.write(f"{pane}\n{session}\n")
+    except Exception:
+        return
+    # Register tmux keybinding: prefix + T -> jump back to this pane
+    jump_cmd = (
+        f"sh -c '"
+        f"PANE=$(head -1 {TUI_PANE_FILE}); "
+        f"SESSION=$(sed -n 2p {TUI_PANE_FILE}); "
+        f'[ -n "$SESSION" ] && tmux switch-client -t "$SESSION"; '
+        f'[ -n "$PANE" ] && tmux select-window -t "$PANE" && tmux select-pane -t "$PANE"'
+        f"'"
+    )
+    try:
+        subprocess.run(["tmux", "unbind-key", JUMP_BACK_KEY], timeout=2)
+        subprocess.run(
+            ["tmux", "bind-key", JUMP_BACK_KEY, "run-shell", jump_cmd],
+            timeout=2,
+        )
+    except Exception:
+        pass
+
 
 STATUS_DOTS = {
     "active": "[green]\u25cf[/]",
@@ -254,6 +298,7 @@ class PaneOverlay(ModalScreen):
         super().__init__(**kwargs)
         self.session_id = session_id
         self._tmux_pane: str | None = None
+        self._tmux_session: str | None = None
         self._pane_alive = True
         self._timer = None
 
@@ -272,12 +317,13 @@ class PaneOverlay(ModalScreen):
             db = sqlite3.connect(DB_PATH)
             db.row_factory = sqlite3.Row
             row = db.execute(
-                "SELECT tmux_pane FROM sessions WHERE session_id = ?",
+                "SELECT tmux_pane, tmux_session FROM sessions WHERE session_id = ?",
                 (self.session_id,),
             ).fetchone()
             db.close()
             if row:
                 self._tmux_pane = row["tmux_pane"]
+                self._tmux_session = row["tmux_session"]
         except Exception:
             pass
 
@@ -401,6 +447,11 @@ class PaneOverlay(ModalScreen):
         if not self._tmux_pane:
             return
         try:
+            if self._tmux_session:
+                subprocess.run(
+                    ["tmux", "switch-client", "-t", self._tmux_session],
+                    timeout=2,
+                )
             subprocess.run(["tmux", "select-window", "-t", self._tmux_pane], timeout=2)
             subprocess.run(["tmux", "select-pane", "-t", self._tmux_pane], timeout=2)
         except Exception:
@@ -579,6 +630,8 @@ class SessionTracker(App):
         yield Footer()
 
     async def on_mount(self):
+        _register_tui_pane()
+
         # Start bridge watcher for container sessions
         from .server import bridge_watcher
         self._bridge_stop = threading.Event()
@@ -807,11 +860,17 @@ class SessionTracker(App):
             db = sqlite3.connect(DB_PATH)
             db.row_factory = sqlite3.Row
             row = db.execute(
-                "SELECT tmux_pane FROM sessions WHERE session_id = ?", (sid,)
+                "SELECT tmux_pane, tmux_session FROM sessions WHERE session_id = ?", (sid,)
             ).fetchone()
             db.close()
             if row and row["tmux_pane"]:
                 pane = row["tmux_pane"]
+                target_session = row["tmux_session"]
+                if target_session:
+                    subprocess.run(
+                        ["tmux", "switch-client", "-t", target_session],
+                        timeout=2,
+                    )
                 subprocess.run(["tmux", "select-window", "-t", pane], timeout=2)
                 subprocess.run(["tmux", "select-pane", "-t", pane], timeout=2)
         except Exception:
