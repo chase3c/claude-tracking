@@ -632,6 +632,9 @@ class SessionTracker(App):
     async def on_mount(self):
         _register_tui_pane()
 
+        from .track import cleanup_stale_sessions
+        cleanup_stale_sessions()
+
         # Start bridge watcher for container sessions
         from .server import bridge_watcher
         self._bridge_stop = threading.Event()

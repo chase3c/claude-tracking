@@ -293,6 +293,52 @@ def track(data, source=None, tmux_pane_override=None):
     db.close()
 
 
+def cleanup_stale_sessions():
+    """Mark sessions ended if their tmux pane no longer exists in the expected session.
+
+    Called once at TUI startup to clear out sessions left in active/waiting/idle
+    after a reboot or crash.
+    """
+    if not os.path.exists(DB_PATH):
+        return
+    try:
+        # Get all currently active (tmux_session, pane_id) pairs
+        active_panes: set[tuple[str, str]] = set()
+        try:
+            result = subprocess.run(
+                ["tmux", "list-panes", "-a", "-F", "#{session_name} #{pane_id}"],
+                capture_output=True, text=True, timeout=2,
+            )
+            for line in result.stdout.splitlines():
+                parts = line.strip().split()
+                if len(parts) == 2:
+                    active_panes.add((parts[0], parts[1]))
+        except Exception:
+            pass
+
+        db = sqlite3.connect(DB_PATH)
+        db.execute("PRAGMA busy_timeout=1000")
+        rows = db.execute(
+            "SELECT session_id, tmux_pane, tmux_session FROM sessions WHERE status IN ('active', 'waiting', 'idle')"
+        ).fetchall()
+        stale = []
+        for session_id, pane, tmux_session in rows:
+            if not pane or not tmux_session:
+                stale.append(session_id)
+                continue
+            if (tmux_session, pane) not in active_panes:
+                stale.append(session_id)
+        if stale:
+            db.executemany(
+                "UPDATE sessions SET status = 'ended' WHERE session_id = ?",
+                [(sid,) for sid in stale],
+            )
+            db.commit()
+        db.close()
+    except Exception:
+        pass
+
+
 def handle_hook():
     """Entry point for the hook command."""
     try:
