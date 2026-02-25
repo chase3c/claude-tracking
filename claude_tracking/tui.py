@@ -10,7 +10,6 @@ from datetime import datetime
 
 from rich.table import Table as RichTable
 from rich.text import Text
-from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -996,7 +995,6 @@ class SessionTracker(App):
         except Exception:
             pass
 
-    @work
     async def action_toggle_pending(self):
         sid = self._get_selected_session_id()
         if not sid:
@@ -1014,22 +1012,25 @@ class SessionTracker(App):
                 db.close()
             except Exception:
                 pass
+            await self.refresh_data()
         else:
             # Prompt for reason then mark pending
-            reason = await self.push_screen_wait(PendingReasonScreen())
-            if reason is None:
-                return  # cancelled
-            try:
-                db = sqlite3.connect(DB_PATH)
-                db.execute(
-                    "UPDATE sessions SET status = 'pending', pending_reason = ? WHERE session_id = ?",
-                    (reason or None, sid),
-                )
-                db.commit()
-                db.close()
-            except Exception:
-                pass
-        await self.refresh_data()
+            def handle_reason(reason: str | None) -> None:
+                if reason is None:
+                    return  # cancelled
+                try:
+                    db = sqlite3.connect(DB_PATH)
+                    db.execute(
+                        "UPDATE sessions SET status = 'pending', pending_reason = ? WHERE session_id = ?",
+                        (reason or None, sid),
+                    )
+                    db.commit()
+                    db.close()
+                except Exception:
+                    pass
+                self.call_later(self.refresh_data)
+
+            self.push_screen(PendingReasonScreen(), handle_reason)
 
     async def action_toggle_priority(self):
         sid = self._get_selected_session_id()
