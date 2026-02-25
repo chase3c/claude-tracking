@@ -692,10 +692,10 @@ class SessionTracker(App):
 
     # Column definitions: (col_id, status_key, header_icon)
     _BASE_COLUMNS = [
-        ("col-pending", "pending", "\u23f8"),
         ("col-waiting", "waiting", "\u26a0"),
         ("col-idle", "idle", "\u25cf"),
         ("col-active", "active", "\u25cf"),
+        ("col-pending", "pending", "\u23f8"),
     ]
     _ENDED_COLUMN = ("col-ended", "ended", "\u25cf")
 
@@ -1010,27 +1010,24 @@ class SessionTracker(App):
                 )
                 db.commit()
                 db.close()
-                await self.refresh_data()
             except Exception:
                 pass
         else:
             # Prompt for reason then mark pending
-            def handle_reason(reason: str | None) -> None:
-                if reason is None:
-                    return  # cancelled
-                try:
-                    db = sqlite3.connect(DB_PATH)
-                    db.execute(
-                        "UPDATE sessions SET status = 'pending', pending_reason = ? WHERE session_id = ?",
-                        (reason or None, sid),
-                    )
-                    db.commit()
-                    db.close()
-                except Exception:
-                    pass
-                self.call_after_refresh(self.refresh_data)
-
-            await self.push_screen(PendingReasonScreen(), handle_reason)
+            reason = await self.push_screen_wait(PendingReasonScreen())
+            if reason is None:
+                return  # cancelled
+            try:
+                db = sqlite3.connect(DB_PATH)
+                db.execute(
+                    "UPDATE sessions SET status = 'pending', pending_reason = ? WHERE session_id = ?",
+                    (reason or None, sid),
+                )
+                db.commit()
+                db.close()
+            except Exception:
+                pass
+        await self.refresh_data()
 
     async def action_toggle_priority(self):
         sid = self._get_selected_session_id()
