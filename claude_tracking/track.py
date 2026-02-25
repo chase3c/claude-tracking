@@ -390,17 +390,6 @@ def set_name(name: str) -> str:
     db.commit()
     db.close()
 
-    # Sync with Claude's own session rename.
-    # Unset CLAUDECODE so the CLI can run from inside an active Claude session.
-    try:
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-        subprocess.run(
-            ["claude", "session", "rename", session_id, name],
-            timeout=5,
-            env=env,
-        )
-    except Exception:
-        pass  # tracking DB update already succeeded; Claude rename is best-effort
 
     return session_id
 
