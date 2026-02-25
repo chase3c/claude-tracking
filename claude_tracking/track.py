@@ -390,16 +390,19 @@ def set_name(name: str) -> str:
     db.commit()
     db.close()
 
-    # Write rename entries directly to Claude's session JSONL — same format as /rename
+    # Send /rename to the pane after this command exits so Claude processes it live.
+    # Detached subprocess with name passed via env to avoid quoting issues.
     try:
-        encoded_dir = (project_dir or "").replace("/", "-")
-        jsonl_path = os.path.expanduser(
-            f"~/.claude/projects/{encoded_dir}/{session_id}.jsonl"
+        env = os.environ.copy()
+        env["_CLAUDE_TRACK_NAME"] = name
+        env["_CLAUDE_TRACK_PANE"] = pane
+        subprocess.Popen(
+            ["sh", "-c", 'sleep 0.5 && tmux send-keys -t "$_CLAUDE_TRACK_PANE" "/rename $_CLAUDE_TRACK_NAME" Enter'],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=env,
         )
-        if os.path.exists(jsonl_path):
-            with open(jsonl_path, "a") as f:
-                f.write(json.dumps({"type": "custom-title", "customTitle": name, "sessionId": session_id}) + "\n")
-                f.write(json.dumps({"type": "agent-name", "agentName": name, "sessionId": session_id}) + "\n")
     except Exception:
         pass  # tracking DB update already succeeded
 
