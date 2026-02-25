@@ -377,7 +377,7 @@ def set_name(name: str) -> str:
     init_db(db)
 
     row = db.execute(
-        "SELECT session_id FROM sessions WHERE tmux_pane = ? ORDER BY last_activity DESC LIMIT 1",
+        "SELECT session_id, project_dir FROM sessions WHERE tmux_pane = ? ORDER BY last_activity DESC LIMIT 1",
         (pane,),
     ).fetchone()
 
@@ -385,11 +385,23 @@ def set_name(name: str) -> str:
         db.close()
         raise RuntimeError(f"No tracked session found for pane {pane}")
 
-    session_id = row[0]
+    session_id, project_dir = row
     db.execute("UPDATE sessions SET name = ? WHERE session_id = ?", (name, session_id))
     db.commit()
     db.close()
 
+    # Write rename entries directly to Claude's session JSONL — same format as /rename
+    try:
+        encoded_dir = (project_dir or "").replace("/", "-")
+        jsonl_path = os.path.expanduser(
+            f"~/.claude/projects/{encoded_dir}/{session_id}.jsonl"
+        )
+        if os.path.exists(jsonl_path):
+            with open(jsonl_path, "a") as f:
+                f.write(json.dumps({"type": "custom-title", "customTitle": name, "sessionId": session_id}) + "\n")
+                f.write(json.dumps({"type": "agent-name", "agentName": name, "sessionId": session_id}) + "\n")
+    except Exception:
+        pass  # tracking DB update already succeeded
 
     return session_id
 
