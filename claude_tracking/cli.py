@@ -22,6 +22,9 @@ def main():
 
     sub.add_parser("hook", help="Process a hook event from stdin (internal)")
 
+    name_parser = sub.add_parser("set-name", help="Name the current session")
+    name_parser.add_argument("name", help="Display name for this session")
+
     bridge_parser = sub.add_parser(
         "bridge-dirs", help="Manage directories scanned for container bridge events"
     )
@@ -58,6 +61,15 @@ def main():
     elif args.command == "hook":
         from .track import handle_hook
         handle_hook()
+
+    elif args.command == "set-name":
+        from .track import set_name
+        try:
+            session_id = set_name(args.name)
+            print(f"Named session {session_id[:8]}… → \"{args.name}\"")
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
 
     elif args.command == "bridge-dirs":
         from .server import load_bridge_dirs, save_bridge_dirs

@@ -222,9 +222,14 @@ class SessionCard(Static):
         table.add_column("left", ratio=1, no_wrap=True, overflow="ellipsis")
         table.add_column("right", justify="right", no_wrap=True)
 
-        # Line 1: project name + status
+        # Line 1: custom name (if set) or project dir + status
         priority_marker = "[bold #bb77ff]★[/] " if s.get("is_priority") else ""
-        table.add_row(f"{priority_marker}[bold]{project}[/]", status_label)
+        custom_name = s.get("name", "")
+        if custom_name:
+            table.add_row(f"{priority_marker}[bold]{custom_name}[/]", status_label)
+            table.add_row(f"[dim]{project}[/]", "")
+        else:
+            table.add_row(f"{priority_marker}[bold]{project}[/]", status_label)
 
         # Line 2: current activity
         table.add_row(activity if activity else "[dim]\u2014[/]", "")

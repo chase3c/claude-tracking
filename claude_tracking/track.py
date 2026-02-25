@@ -71,6 +71,12 @@ def init_db(db):
         db.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate: add custom session name
+    try:
+        db.execute("ALTER TABLE sessions ADD COLUMN name TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     db.commit()
 
 
@@ -263,6 +269,15 @@ def track(data, source=None, tmux_pane_override=None):
             params,
         )
     else:
+        # New session: if it has a tmux pane, end any other sessions on that pane
+        if pane:
+            db.execute(
+                """UPDATE sessions SET status = 'ended'
+                   WHERE tmux_pane = ? AND session_id != ?
+                   AND status NOT IN ('ended', 'dismissed')""",
+                (pane, session_id),
+            )
+
         prompt_text = ""
         if event_name == "UserPromptSubmit":
             prompt_text = data.get("prompt", "")[:200]
@@ -337,6 +352,46 @@ def cleanup_stale_sessions():
         db.close()
     except Exception:
         pass
+
+
+def set_name(name: str) -> str:
+    """Set a custom name for the session in the current tmux pane.
+
+    Writes to tracking.db and syncs via `claude session rename`.
+    Returns the session_id on success, raises RuntimeError on failure.
+    """
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        raise RuntimeError("TMUX_PANE not set — are you in a tmux pane?")
+
+    db = sqlite3.connect(DB_PATH)
+    db.execute("PRAGMA busy_timeout=1000")
+    init_db(db)
+
+    row = db.execute(
+        "SELECT session_id FROM sessions WHERE tmux_pane = ? ORDER BY last_activity DESC LIMIT 1",
+        (pane,),
+    ).fetchone()
+
+    if not row:
+        db.close()
+        raise RuntimeError(f"No tracked session found for pane {pane}")
+
+    session_id = row[0]
+    db.execute("UPDATE sessions SET name = ? WHERE session_id = ?", (name, session_id))
+    db.commit()
+    db.close()
+
+    # Sync with Claude's own session rename
+    try:
+        subprocess.run(
+            ["claude", "session", "rename", session_id, name],
+            timeout=5,
+        )
+    except Exception:
+        pass  # tracking DB update already succeeded; Claude rename is best-effort
+
+    return session_id
 
 
 def handle_hook():
