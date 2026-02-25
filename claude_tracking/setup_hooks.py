@@ -5,6 +5,8 @@ import shutil
 from datetime import datetime
 
 SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
+COMMANDS_DIR = os.path.expanduser("~/.claude/commands")
+SKILLS_DIR = os.path.join(os.path.dirname(__file__), "skills")
 HOOK_COMMAND = "claude-track hook"
 
 HOOK_EVENTS = {
@@ -71,6 +73,16 @@ def install():
         json.dump(settings, f, indent=2)
         f.write("\n")
 
+    # Install skills into ~/.claude/commands/
+    os.makedirs(COMMANDS_DIR, exist_ok=True)
+    for skill_file in os.listdir(SKILLS_DIR):
+        if not skill_file.endswith(".md"):
+            continue
+        src = os.path.join(SKILLS_DIR, skill_file)
+        dst = os.path.join(COMMANDS_DIR, skill_file)
+        shutil.copy2(src, dst)
+        print(f"  Installed skill: /{skill_file[:-3]}")
+
     print(f"\nHooks installed in {SETTINGS_PATH}")
     print(f"\nNew Claude Code sessions will now be tracked automatically.")
     print(f"\nTo view sessions:")
@@ -104,6 +116,15 @@ def uninstall():
         f.write("\n")
 
     print(f"Removed {removed} tracking hooks from {SETTINGS_PATH}")
+
+    # Remove installed skills
+    for skill_file in os.listdir(SKILLS_DIR):
+        if not skill_file.endswith(".md"):
+            continue
+        dst = os.path.join(COMMANDS_DIR, skill_file)
+        if os.path.exists(dst):
+            os.remove(dst)
+            print(f"  Removed skill: /{skill_file[:-3]}")
 
 
 if __name__ == "__main__":
