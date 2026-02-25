@@ -11,6 +11,7 @@ from datetime import datetime
 from rich.table import Table as RichTable
 from rich.text import Text
 from textual.app import App, ComposeResult
+from textual.worker import work
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
@@ -995,6 +996,7 @@ class SessionTracker(App):
         except Exception:
             pass
 
+    @work
     async def action_toggle_pending(self):
         sid = self._get_selected_session_id()
         if not sid:
