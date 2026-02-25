@@ -1028,7 +1028,7 @@ class SessionTracker(App):
                     db.close()
                 except Exception:
                     pass
-                self.call_later(self.refresh_data)
+                # Let the 3-second interval pick up the change
 
             self.push_screen(PendingReasonScreen(), handle_reason)
 
