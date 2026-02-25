@@ -15,7 +15,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, Input, Static
 
 DB_PATH = os.path.expanduser("~/.claude/tracking.db")
 TUI_PANE_FILE = os.path.expanduser("~/.claude/tui-pane")
@@ -146,6 +146,21 @@ def format_activity(last_tool, last_detail, last_event):
     if last_tool == "Bash":
         return f"{label} [cyan]`{detail}`[/]"
     return f"{label} [cyan]{detail}[/]"
+
+
+def fuzzy_match(query: str, target: str) -> bool:
+    """Return True if all query chars appear in order in target."""
+    if not query:
+        return True
+    target = target.lower()
+    query = query.lower()
+    idx = 0
+    for char in query:
+        pos = target.find(char, idx)
+        if pos == -1:
+            return False
+        idx = pos + 1
+    return True
 
 
 def fetch_sessions(show_all=False):
@@ -584,6 +599,17 @@ class SessionTracker(App):
         background: $boost;
         color: $text-muted;
     }
+    #search-bar {
+        height: auto;
+        padding: 0 1;
+        display: none;
+    }
+    #search-bar.active {
+        display: block;
+    }
+    #search-bar Input {
+        width: 1fr;
+    }
     """
 
     TITLE = "Claude Sessions"
@@ -604,6 +630,7 @@ class SessionTracker(App):
         Binding("d", "dismiss", "Dismiss"),
         Binding("a", "show_all", "Show ended"),
         Binding("r", "force_refresh", "Refresh"),
+        Binding("/", "start_search", "Search"),
     ]
 
     show_ended = reactive(False)
@@ -624,6 +651,8 @@ class SessionTracker(App):
         self._sel_row: int = 0
         # Map session_id -> session dict for quick lookup
         self._sessions_by_id: dict[str, dict] = {}
+        self._searching: bool = False
+        self._search_query: str = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -631,6 +660,8 @@ class SessionTracker(App):
             for col_id, _status, _icon in self._BASE_COLUMNS:
                 with VerticalScroll(id=col_id, classes="status-column"):
                     yield Static(classes="col-header")
+        with Horizontal(id="search-bar"):
+            yield Input(placeholder="fuzzy search sessions…", id="search-input")
         yield Static(id="status-bar")
         yield Footer()
 
@@ -660,6 +691,12 @@ class SessionTracker(App):
 
     async def refresh_data(self):
         sessions = fetch_sessions(show_all=self.show_ended)
+        if self._search_query:
+            sessions = [
+                s for s in sessions
+                if fuzzy_match(self._search_query, s.get("name", "") or "")
+                or fuzzy_match(self._search_query, s.get("project_dir", "") or "")
+            ]
         self._sessions_by_id = {s["session_id"]: s for s in sessions}
 
         # Status bar summary
@@ -944,6 +981,34 @@ class SessionTracker(App):
 
     async def action_force_refresh(self):
         await self.refresh_data()
+
+    def action_start_search(self):
+        self._searching = True
+        bar = self.query_one("#search-bar")
+        bar.add_class("active")
+        self.query_one("#search-input", Input).focus()
+
+    async def _exit_search(self):
+        self._searching = False
+        self._search_query = ""
+        inp = self.query_one("#search-input", Input)
+        inp.value = ""
+        self.query_one("#search-bar").remove_class("active")
+        self.set_focus(None)
+        await self.refresh_data()
+
+    async def on_input_changed(self, event: Input.Changed) -> None:
+        self._search_query = event.value
+        await self.refresh_data()
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.action_jump()
+        await self._exit_search()
+
+    async def on_key(self, event) -> None:
+        if self._searching and event.key == "escape":
+            event.prevent_default()
+            await self._exit_search()
 
 
 if __name__ == "__main__":
