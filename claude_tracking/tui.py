@@ -983,12 +983,17 @@ class SessionTracker(App):
         await self.refresh_data()
 
     def action_start_search(self):
+        """Open search bar and enter insert mode."""
         self._searching = True
-        bar = self.query_one("#search-bar")
-        bar.add_class("active")
+        self.query_one("#search-bar").add_class("active")
         self.query_one("#search-input", Input).focus()
 
-    async def _exit_search(self):
+    def _enter_search_normal_mode(self):
+        """Blur input but keep filter active — back to j/k navigation."""
+        self.set_focus(None)
+
+    async def _clear_search(self):
+        """Clear filter and hide search bar entirely."""
         self._searching = False
         self._search_query = ""
         inp = self.query_one("#search-input", Input)
@@ -1002,13 +1007,25 @@ class SessionTracker(App):
         await self.refresh_data()
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.action_jump()
-        await self._exit_search()
+        """Enter in insert mode: drop to normal mode to navigate results."""
+        self._enter_search_normal_mode()
 
     async def on_key(self, event) -> None:
-        if self._searching and event.key == "escape":
+        inp = self.query_one("#search-input", Input)
+        input_focused = self.focused is inp
+
+        if input_focused and event.key == "escape":
+            # Insert mode → normal mode (keep filter)
             event.prevent_default()
-            await self._exit_search()
+            self._enter_search_normal_mode()
+        elif self._searching and not input_focused and event.key == "escape":
+            # Normal mode with filter → clear search
+            event.prevent_default()
+            await self._clear_search()
+        elif self._searching and not input_focused and event.key == "slash":
+            # Normal mode → back to insert mode
+            event.prevent_default()
+            inp.focus()
 
 
 if __name__ == "__main__":
