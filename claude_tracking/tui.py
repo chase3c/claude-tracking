@@ -68,6 +68,7 @@ STATUS_DOTS = {
     "active": "[green]\u25cf[/]",
     "idle": "[yellow]\u25cf[/]",
     "waiting": "[#db6d28]\u25cf[/]",
+    "pending": "[#4a9eff]\u25cf[/]",
     "ended": "[dim]\u25cf[/]",
 }
 
@@ -75,6 +76,7 @@ STATUS_LABELS = {
     "active": "[green]Active[/]",
     "idle": "[yellow]Idle[/]",
     "waiting": "[#db6d28]Waiting[/]",
+    "pending": "[#4a9eff]Pending[/]",
     "ended": "[dim]Ended[/]",
 }
 
@@ -226,9 +228,12 @@ class SessionCard(Static):
         last = time_ago(s.get("last_activity", ""))
         status_label = STATUS_LABELS.get(status, status)
 
-        # Override activity for waiting sessions
+        # Override activity for special statuses
         if status == "waiting":
             activity = "[bold #db6d28]\u26a0 NEEDS PERMISSION[/]"
+        if status == "pending":
+            reason = s.get("pending_reason", "") or ""
+            activity = f"[#4a9eff]\u23f8 {reason}[/]" if reason else "[#4a9eff]\u23f8 Pending[/]"
 
         # Use a Rich Table for left/right alignment
         table = RichTable(
@@ -492,6 +497,48 @@ class PaneOverlay(ModalScreen):
 
 
 # ---------------------------------------------------------------------------
+# PendingReasonScreen — prompt for a reason when marking a session pending
+# ---------------------------------------------------------------------------
+
+
+class PendingReasonScreen(ModalScreen):
+    """Modal to enter a reason when marking a session as pending."""
+
+    CSS = """
+    PendingReasonScreen {
+        align: center middle;
+    }
+    #reason-container {
+        width: 60;
+        height: auto;
+        border: round $accent;
+        background: $surface;
+        padding: 1 2;
+    }
+    #reason-label {
+        height: auto;
+        margin-bottom: 1;
+    }
+    """
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel", priority=True)]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="reason-container"):
+            yield Static("[bold]Pending reason[/] [dim](optional — press Enter to skip)[/]", id="reason-label")
+            yield Input(placeholder="e.g. waiting on PR #123…", id="reason-input")
+
+    def on_mount(self):
+        self.query_one("#reason-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+# ---------------------------------------------------------------------------
 # SessionTracker — main app with kanban-style status columns
 # ---------------------------------------------------------------------------
 
@@ -538,6 +585,9 @@ class SessionTracker(App):
     SessionCard.status-ended {
         border: round #666666;
     }
+    SessionCard.status-pending {
+        border: round #4a9eff;
+    }
     SessionCard.card-selected {
         border: double $accent;
         background: $boost;
@@ -556,6 +606,10 @@ class SessionTracker(App):
     }
     SessionCard.card-selected.status-ended {
         border: double #666666;
+        background: $boost;
+    }
+    SessionCard.card-selected.status-pending {
+        border: double #4a9eff;
         background: $boost;
     }
     SessionCard.card-priority {
@@ -631,12 +685,14 @@ class SessionTracker(App):
         Binding("a", "show_all", "Show ended"),
         Binding("r", "force_refresh", "Refresh"),
         Binding("/", "start_search", "Search"),
+        Binding("w", "toggle_pending", "Pending"),
     ]
 
     show_ended = reactive(False)
 
     # Column definitions: (col_id, status_key, header_icon)
     _BASE_COLUMNS = [
+        ("col-pending", "pending", "\u23f8"),
         ("col-waiting", "waiting", "\u26a0"),
         ("col-idle", "idle", "\u25cf"),
         ("col-active", "active", "\u25cf"),
@@ -725,7 +781,9 @@ class SessionTracker(App):
         buckets: dict[str, list[dict]] = {col_id: [] for col_id, _, _ in col_defs}
         for s in sessions:
             status = s["status"]
-            if status == "waiting":
+            if status == "pending":
+                buckets["col-pending"].append(s)
+            elif status == "waiting":
                 buckets["col-waiting"].append(s)
             elif status == "idle":
                 buckets["col-idle"].append(s)
@@ -936,6 +994,43 @@ class SessionTracker(App):
             await self.refresh_data()
         except Exception:
             pass
+
+    async def action_toggle_pending(self):
+        sid = self._get_selected_session_id()
+        if not sid:
+            return
+        session = self._sessions_by_id.get(sid, {})
+        if session.get("status") == "pending":
+            # Clear pending → idle
+            try:
+                db = sqlite3.connect(DB_PATH)
+                db.execute(
+                    "UPDATE sessions SET status = 'idle', pending_reason = NULL WHERE session_id = ?",
+                    (sid,),
+                )
+                db.commit()
+                db.close()
+                await self.refresh_data()
+            except Exception:
+                pass
+        else:
+            # Prompt for reason then mark pending
+            def handle_reason(reason: str | None) -> None:
+                if reason is None:
+                    return  # cancelled
+                try:
+                    db = sqlite3.connect(DB_PATH)
+                    db.execute(
+                        "UPDATE sessions SET status = 'pending', pending_reason = ? WHERE session_id = ?",
+                        (reason or None, sid),
+                    )
+                    db.commit()
+                    db.close()
+                except Exception:
+                    pass
+                self.call_after_refresh(self.refresh_data)
+
+            await self.push_screen(PendingReasonScreen(), handle_reason)
 
     async def action_toggle_priority(self):
         sid = self._get_selected_session_id()

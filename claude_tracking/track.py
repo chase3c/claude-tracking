@@ -77,6 +77,12 @@ def init_db(db):
         db.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate: add pending reason
+    try:
+        db.execute("ALTER TABLE sessions ADD COLUMN pending_reason TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
     db.commit()
 
 
@@ -406,6 +412,38 @@ def set_name(name: str) -> str:
     except Exception:
         pass  # tracking DB update already succeeded
 
+    return session_id
+
+
+def set_pending(reason: str = "") -> str:
+    """Mark the session in the current tmux pane as pending.
+
+    Returns the session_id on success, raises RuntimeError on failure.
+    """
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        raise RuntimeError("TMUX_PANE not set — are you in a tmux pane?")
+
+    db = sqlite3.connect(DB_PATH)
+    db.execute("PRAGMA busy_timeout=1000")
+    init_db(db)
+
+    row = db.execute(
+        "SELECT session_id FROM sessions WHERE tmux_pane = ? ORDER BY last_activity DESC LIMIT 1",
+        (pane,),
+    ).fetchone()
+
+    if not row:
+        db.close()
+        raise RuntimeError(f"No tracked session found for pane {pane}")
+
+    session_id = row[0]
+    db.execute(
+        "UPDATE sessions SET status = 'pending', pending_reason = ? WHERE session_id = ?",
+        (reason or None, session_id),
+    )
+    db.commit()
+    db.close()
     return session_id
 
 

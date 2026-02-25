@@ -25,6 +25,9 @@ def main():
     name_parser = sub.add_parser("set-name", help="Name the current session")
     name_parser.add_argument("name", help="Display name for this session")
 
+    pending_parser = sub.add_parser("set-pending", help="Mark the current session as pending")
+    pending_parser.add_argument("reason", nargs="?", default="", help="Reason (e.g. 'waiting on PR #123')")
+
     bridge_parser = sub.add_parser(
         "bridge-dirs", help="Manage directories scanned for container bridge events"
     )
@@ -67,6 +70,16 @@ def main():
         try:
             session_id = set_name(args.name)
             print(f"Named session {session_id[:8]}… → \"{args.name}\"")
+        except RuntimeError as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    elif args.command == "set-pending":
+        from .track import set_pending
+        try:
+            session_id = set_pending(args.reason)
+            label = f" — \"{args.reason}\"" if args.reason else ""
+            print(f"Marked session {session_id[:8]}… as pending{label}")
         except RuntimeError as e:
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
