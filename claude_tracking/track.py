@@ -334,15 +334,23 @@ def cleanup_stale_sessions():
         db = sqlite3.connect(DB_PATH)
         db.execute("PRAGMA busy_timeout=1000")
         rows = db.execute(
-            "SELECT session_id, tmux_pane, tmux_session FROM sessions WHERE status IN ('active', 'waiting', 'idle')"
+            "SELECT session_id, tmux_pane, tmux_session FROM sessions WHERE status IN ('active', 'waiting', 'idle') ORDER BY last_activity DESC"
         ).fetchall()
         stale = []
+        # Track panes we've seen to detect duplicates (keep most recent)
+        seen_panes: dict[str, str] = {}  # pane -> session_id (first seen = most recent due to query order)
         for session_id, pane, tmux_session in rows:
             if not pane or not tmux_session:
                 stale.append(session_id)
                 continue
             if (tmux_session, pane) not in active_panes:
                 stale.append(session_id)
+                continue
+            # If another session already claims this pane, the older one is stale
+            if pane in seen_panes:
+                stale.append(session_id)
+            else:
+                seen_panes[pane] = session_id
         if stale:
             db.executemany(
                 "UPDATE sessions SET status = 'ended' WHERE session_id = ?",
