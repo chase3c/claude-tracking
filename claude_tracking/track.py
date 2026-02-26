@@ -379,7 +379,7 @@ def set_name(name: str) -> str:
         raise RuntimeError("TMUX_PANE not set — are you in a tmux pane?")
 
     db = sqlite3.connect(DB_PATH)
-    db.execute("PRAGMA busy_timeout=1000")
+    db.execute("PRAGMA busy_timeout=5000")
     init_db(db)
 
     row = db.execute(
@@ -425,7 +425,7 @@ def set_pending(reason: str = "") -> str:
         raise RuntimeError("TMUX_PANE not set — are you in a tmux pane?")
 
     db = sqlite3.connect(DB_PATH)
-    db.execute("PRAGMA busy_timeout=1000")
+    db.execute("PRAGMA busy_timeout=5000")
     init_db(db)
 
     row = db.execute(
